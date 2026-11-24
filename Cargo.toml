@@ -1,6 +1,6 @@
 [package]
 name = "lokai"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 description = "LoKAI (lokale KI, local AI): launcher-style chat client for local AI models, with tools, for KDE Plasma"
 license = "MIT"

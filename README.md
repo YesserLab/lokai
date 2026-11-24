@@ -6,6 +6,8 @@ hardware: this PC, or another machine on your network. Press a shortcut, ask, an
 streams in. It can also work on your machine: run shell commands and read, edit and search
 files, asking for your approval first.
 
+![LoKI answering a question about disk usage and asking before it runs a command](assets/screenshot.png)
+
 ## Features
 
 - A borderless launcher on **Meta+Alt+Space**, centered on the screen under your mouse. It starts
@@ -121,6 +123,7 @@ just run          # build and run
 just test         # unit tests and clippy
 just e2e http://127.0.0.1:8080   # agent runs against a real server
 just snapshots    # render the launcher into PNGs (target/snapshots)
+just screenshot   # render the README screenshot (assets/screenshot.png)
 just package      # build deb/rpm/archlinux packages into dist/
 just stage DIR    # install the files into DIR (e.g. a package root)
 just icons        # download the Lucide icons again
@@ -139,7 +142,7 @@ src/ui.rs          the launcher window (egui)
 src/theme.rs       palette from the KDE color scheme, fonts, logo
 src/icons.rs       Lucide icons
 src/compat.rs      glibc compatibility shims
-assets/            logo, Lucide icons (and their fetch script)
+assets/            logo, screenshot, Lucide icons (and their fetch script)
 packaging/         desktop entry
 nfpm.yaml          package manifest
 justfile           build, test, package recipes

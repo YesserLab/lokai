@@ -1219,22 +1219,38 @@ mod snapshots {
 
     fn render(name: &str, view: View, fill: impl Fn(&mut State)) {
         let dir = std::path::PathBuf::from(std::env::var("LOKI_SNAPSHOT_DIR").unwrap_or_else(|_| "target/snapshots".into()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let tmp = std::env::temp_dir().join(format!("loki-snap-{}", std::process::id()));
+        render_to(&dir.join(format!("{name}.png")), view, fill);
+    }
+
+    /// Renders one view of a clean session: fresh config and data directories, and a server
+    /// address nobody listens on, so nothing real (server, models, history) shows up in the image.
+    fn render_to(path: &std::path::Path, view: View, fill: impl Fn(&mut State)) {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let tmp = std::env::temp_dir().join(format!("loki-snap-{}-{}", std::process::id(), path.display().to_string().replace('/', "_")));
+        std::fs::create_dir_all(tmp.join("config/loki")).unwrap();
+        std::fs::write(tmp.join("config/loki/config.toml"), "server_url = \"http://127.0.0.1:1\"\n").unwrap();
         // SAFETY: set before any other thread reads them; keeps the real config untouched.
         unsafe {
             std::env::set_var("XDG_CONFIG_HOME", tmp.join("config"));
             std::env::set_var("XDG_DATA_HOME", tmp.join("data"));
         }
         let core = Core::new();
+        // Let the first connection check fail (nothing listens on port 1); the next one is 30 s away.
+        let start = Instant::now();
+        while !matches!(core.lock().conn, Conn::Error) {
+            assert!(start.elapsed() < Duration::from_secs(5), "connection check did not finish");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         {
             let mut st = core.lock();
-            st.config.model = "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF:Q4_K_M".into();
-            st.config.server_url = "http://192.168.0.171:8080".into();
-            st.cwd = crate::config::home_dir().join("Projects/loki");
+            st.config.model = "Qwen3-32B-Q4_K_M".into();
+            st.cwd = st.config.scratch_dir();
             st.conn = Conn::Connected;
+            st.conn_detail.clear();
             st.latency_ms = Some(3);
-            st.models = vec![st.config.model.clone(), "qwen3-coder:30b".into()];
+            st.models = vec![st.config.model.clone(), "Qwen3-Coder-30B-A3B".into()];
             fill(&mut st);
         }
         let (_tx, rx) = mpsc::channel();
@@ -1291,7 +1307,50 @@ mod snapshots {
             });
         harness.run_steps(6);
         let image = harness.render().expect("render");
-        image.save(dir.join(format!("{name}.png"))).unwrap();
+        image.save(path).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The README screenshot: `just screenshot` writes assets/screenshot.png.
+    #[test]
+    #[ignore]
+    fn readme_screenshot() {
+        let path = std::path::PathBuf::from(std::env::var("LOKI_SCREENSHOT").unwrap_or_else(|_| "assets/screenshot.png".into()));
+        render_to(&path, View::Chat, |st| {
+            st.items = vec![
+                Item::User { text: "Why is my disk almost full?".into() },
+                Item::Assistant { text: String::new(), reasoning: "Check which folders in home are the largest.".into(), streaming: false },
+                Item::Tool(ToolItem {
+                    id: "c1".into(),
+                    name: "run_command".into(),
+                    summary: "du -sh ~/* ~/.cache | sort -rh | head -4".into(),
+                    detail: "$ du -sh ~/* ~/.cache | sort -rh | head -4".into(),
+                    output: "41G\t/home/user/Videos\n12G\t/home/user/.cache\n6.3G\t/home/user/Downloads\n2.1G\t/home/user/Documents".into(),
+                    status: ToolStatus::Done,
+                }),
+                Item::Assistant {
+                    text: "Most of it is **Videos (41 GB)**. The next biggest is **`~/.cache` (12 GB)**, which is safe to clear; \
+                           apps rebuild it when needed. To clear just the thumbnails:\n\n```sh\nrm -rf ~/.cache/thumbnails\n```"
+                        .into(),
+                    reasoning: String::new(),
+                    streaming: false,
+                },
+                Item::User { text: "Go ahead".into() },
+                Item::Tool(ToolItem {
+                    id: "c3".into(),
+                    name: "run_command".into(),
+                    summary: "rm -rf ~/.cache/thumbnails".into(),
+                    detail: "$ rm -rf ~/.cache/thumbnails\n# in scratch".into(),
+                    output: String::new(),
+                    status: ToolStatus::Approval,
+                }),
+            ];
+            st.config.height = 712.0;
+            st.busy = true;
+            st.tps = 38.4;
+            st.context_tokens = 2914;
+            st.status = "Waiting for your approval".into();
+        });
     }
 
     #[test]

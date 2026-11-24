@@ -33,6 +33,10 @@ e2e server:
 snapshots dir="target/snapshots":
     LOKI_SNAPSHOT_DIR={{dir}} cargo test -- --ignored render_snapshots
 
+# Render the README screenshot into assets/screenshot.png.
+screenshot:
+    cargo test -- --ignored readme_screenshot
+
 # Fail if the binary needs a newer glibc than max_glibc (the packages must run on Debian 13).
 check-glibc: build
     #!/usr/bin/env bash

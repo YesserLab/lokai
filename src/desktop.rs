@@ -234,8 +234,9 @@ impl TrayArt {
     /// redraws whenever they change.
     fn new(cfg: &crate::config::Config) -> Self {
         use crate::config::TrayIcon;
-        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("loki/tray");
-        let mono = Self::write_monochrome(&dir);
+        // Plasma reads IconThemePath like an icon theme: <dir>/hicolor/scalable/apps/<name>.svg.
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("loki/icons");
+        let mono = Self::write_monochrome(&dir.join("hicolor/scalable/apps"));
         let logo = || pixmaps(|s| Some(crate::theme::icon_rgba(s)));
         let custom = cfg.tray_icon_custom.trim();
         let (name, pixmaps) = match cfg.tray_icon {
@@ -260,15 +261,17 @@ impl TrayArt {
         Self { key: Self::key(cfg), name, dir: dir.to_string_lossy().into_owned(), pixmaps }
     }
 
-    /// Writes the monochrome SVG (named after its content, so Plasma never shows a stale cached
-    /// copy) and removes older versions. Returns its icon name and fallback pixmaps.
+    /// Writes the monochrome SVG into `apps_dir` and removes older versions. Returns its icon name
+    /// and fallback pixmaps. The name is derived from the content, so Plasma never shows a stale
+    /// cached copy, and has no dashes: Plasma falls back from "a-b-c" to "a-b" and "a" when a name
+    /// isn't found, and "loki" would be the app icon.
     fn write_monochrome(dir: &std::path::Path) -> (String, Vec<ksni::Icon>) {
         use std::hash::{Hash, Hasher};
         let color = if crate::theme::Palette::detect().dark { "#fcfcfc" } else { "#232629" };
         let svg = monochrome_svg(color);
         let mut h = std::collections::hash_map::DefaultHasher::new();
         svg.hash(&mut h);
-        let name = format!("loki-mono-{:x}", h.finish());
+        let name = format!("loki_mono_{:x}", h.finish());
         let _ = std::fs::create_dir_all(dir);
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
@@ -509,8 +512,9 @@ mod tests {
 
         // Monochrome: an SVG file that Plasma recolors, every shape carrying the color class.
         let mono = TrayArt::new(&cfg);
-        assert!(mono.name.starts_with("loki-mono-") && opaque(&mono));
-        let svg = std::fs::read_to_string(tmp.join(format!("loki/tray/{}.svg", mono.name))).unwrap();
+        assert!(mono.name.starts_with("loki_mono_") && !mono.name.contains('-') && opaque(&mono));
+        assert_eq!(std::path::Path::new(&mono.dir), tmp.join("loki/icons"));
+        let svg = std::fs::read_to_string(tmp.join(format!("loki/icons/hicolor/scalable/apps/{}.svg", mono.name))).unwrap();
         assert!(svg.contains(r#"id="current-color-scheme""#));
         assert_eq!(
             svg.matches("<path ").count(),
@@ -521,7 +525,7 @@ mod tests {
         cfg.tray_icon = crate::config::TrayIcon::Color;
         let color = TrayArt::new(&cfg);
         assert!(color.name.is_empty() && opaque(&color));
-        assert!(tmp.join(format!("loki/tray/{}.svg", mono.name)).is_file());
+        assert!(tmp.join(format!("loki/icons/hicolor/scalable/apps/{}.svg", mono.name)).is_file());
 
         cfg.tray_icon = crate::config::TrayIcon::Custom;
         let svg_file = tmp.join("mine.svg");

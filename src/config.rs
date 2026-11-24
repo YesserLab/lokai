@@ -97,7 +97,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            server_url: "http://192.168.0.171:8080".into(),
+            server_url: "http://127.0.0.1:8080".into(),
             api_key: String::new(),
             model: String::new(),
             restrict_to_lan: true,
@@ -295,7 +295,7 @@ mod tests {
         for u in [
             "http://localhost:11434/v1",
             "http://127.0.0.1:8080",
-            "http://192.168.0.171:8080",
+            "http://192.168.1.50:8080",
             "http://10.0.0.5",
             "http://172.20.1.1",
             "http://gpubox:11434",
@@ -321,8 +321,8 @@ mod tests {
 
     #[test]
     fn api_base() {
-        let mut c = Config { server_url: "http://192.168.0.171:8080".into(), ..Default::default() };
-        assert_eq!(c.api_base(), "http://192.168.0.171:8080/v1");
+        let mut c = Config { server_url: "http://192.168.1.50:8080".into(), ..Default::default() };
+        assert_eq!(c.api_base(), "http://192.168.1.50:8080/v1");
         c.server_url = "http://h:1/v1/".into();
         assert_eq!(c.api_base(), "http://h:1/v1");
         c.server_url = "http://h/api/v2".into();

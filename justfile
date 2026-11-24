@@ -25,7 +25,7 @@ test:
     cargo test
     cargo clippy --release --all-targets -- -D warnings
 
-# Agent runs against a real server, e.g. `just e2e http://192.168.0.171:8080`.
+# Agent runs against a real server, e.g. `just e2e http://127.0.0.1:8080`.
 e2e server:
     LOKI_TEST_SERVER={{server}} cargo test -- --ignored --nocapture agent_
 

@@ -35,13 +35,13 @@ Download a package for your distribution from the
 
 ```sh
 # Debian / Ubuntu
-sudo apt install ./loki_1.0.1_amd64.deb
+sudo apt install ./loki_1.0.2_amd64.deb
 
 # Fedora
-sudo dnf install ./loki-1.0.1-1.x86_64.rpm
+sudo dnf install ./loki-1.0.2-1.x86_64.rpm
 
 # Arch / Manjaro
-sudo pacman -U loki-1.0.1-1-x86_64.pkg.tar.zst
+sudo pacman -U loki-1.0.2-1-x86_64.pkg.tar.zst
 ```
 
 Each package installs the `loki` binary, a desktop entry and the icon. They need glibc 2.39 or
@@ -55,8 +55,10 @@ Autostart and change the command to `loki --background`, which starts it with on
 ## Usage
 
 Run `loki`, or launch "LoKI" from your application menu. On first start, open the settings
-(Ctrl+, or the gear icon) and enter your server's URL, e.g. `http://192.168.0.171:8080`. LoKI
-picks the first model the server lists; you can switch models from the footer.
+(Ctrl+, or the gear icon) and enter your server's URL. The default is `http://127.0.0.1:8080`, a
+server on this PC; for another machine on your network, use its address, e.g.
+`http://192.168.1.50:8080`. LoKI picks the first model the server lists; you can switch models
+from the footer.
 
 | Key | Action |
 |---|---|

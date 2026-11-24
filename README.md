@@ -41,13 +41,13 @@ Download a package for your distribution from the
 
 ```sh
 # Debian / Ubuntu
-sudo apt install ./loki_1.1.0_amd64.deb
+sudo apt install ./loki_1.2.0_amd64.deb
 
 # Fedora
-sudo dnf install ./loki-1.1.0-1.x86_64.rpm
+sudo dnf install ./loki-1.2.0-1.x86_64.rpm
 
 # Arch / Manjaro
-sudo pacman -U loki-1.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U loki-1.2.0-1-x86_64.pkg.tar.zst
 ```
 
 Each package installs the `loki` binary, a desktop entry and the icon. They need glibc 2.39 or

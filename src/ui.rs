@@ -383,7 +383,11 @@ impl Launcher<'_> {
             if let Some((since, stopped)) = self.esc_hold {
                 if !i.key_down(Key::Escape) {
                     self.esc_hold = None;
-                    if !stopped {
+                    if stopped {
+                        // egui drops the focus on every Escape press, and a held key keeps
+                        // repeating: focus the input only now that Esc is up.
+                        self.focus_input = true;
+                    } else {
                         actions.push(Action::Close);
                     }
                 } else if !stopped && i.time - since >= ESC_HOLD {
@@ -1470,8 +1474,13 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
         h.ctx.memory_mut(|m| m.surrender_focus(prompt));
         h.run_steps(1);
         assert!(!h.ctx.memory(|m| m.has_focus(prompt)));
+        // A held key sends repeated presses, like a real keyboard (egui drops focus on each one).
+        let repeat = egui::Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: true, modifiers: Modifiers::NONE };
         h.key_down(Key::Escape);
-        h.run_steps(4); // 0.25 s per step
+        for _ in 0..6 {
+            h.event(repeat.clone());
+            h.run_steps(1); // 0.25 s per step
+        }
         assert!(!core.lock().busy, "holding Esc didn't stop the reply");
         h.key_up(Key::Escape);
         h.run_steps(2);

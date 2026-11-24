@@ -692,35 +692,20 @@ impl Launcher<'_> {
             }
             return;
         }
-        let r = ui.scope(|ui| {
-            for (k, segment) in split_fences(text).into_iter().enumerate() {
-                match segment {
-                    Segment::Markdown(md) => {
-                        let (math, p) = (self.math.clone(), self.p);
-                        let render_math = move |ui: &mut egui::Ui, tex: &str, inline: bool| math.show(ui, tex, inline, p.text, p.muted);
-                        CommonMarkViewer::new().render_math_fn(Some(&render_math)).show_with_id(
-                            Id::unique(("md", idx, k)),
-                            ui,
-                            &mut self.md,
-                            &crate::math::normalize_delimiters(md),
-                        );
-                    }
-                    Segment::Code { lang, code } => self.code_snippet(ui, Id::unique(("code", idx, k)), lang, &code),
+        for (k, segment) in split_fences(text).into_iter().enumerate() {
+            match segment {
+                Segment::Markdown(md) => {
+                    let (math, p) = (self.math.clone(), self.p);
+                    let render_math = move |ui: &mut egui::Ui, tex: &str, inline: bool| math.show(ui, tex, inline, p.text, p.muted);
+                    CommonMarkViewer::new().render_math_fn(Some(&render_math)).show_with_id(
+                        Id::unique(("md", idx, k)),
+                        ui,
+                        &mut self.md,
+                        &crate::math::normalize_delimiters(md),
+                    );
                 }
+                Segment::Code { lang, code } => self.code_snippet(ui, Id::unique(("code", idx, k)), lang, &code),
             }
-        });
-        if streaming {
-            return;
-        }
-        // The action row always takes its space, so hovering never shifts the layout;
-        // it counts as part of the message, so moving onto the button keeps it visible.
-        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
-        let id = Id::unique(("copy", idx));
-        if self.recently_copied(ui, id) || ui.rect_contains_pointer(r.response.rect.union(row)) {
-            let rect = Rect::from_min_size(row.left_top() + vec2(-4.0, 0.0), vec2(row.width(), 22.0));
-            ui.scope_builder(UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)), |ui| {
-                self.copy_button(ui, id, text, true, self.p.surface2);
-            });
         }
     }
 
@@ -733,14 +718,12 @@ impl Launcher<'_> {
         copied
     }
 
-    /// Lucide copy icon (optionally labelled) that turns into a green check for a moment after a click.
-    fn copy_button(&mut self, ui: &mut egui::Ui, id: Id, text: &str, label: bool, hover_bg: Color32) {
+    /// Lucide copy icon that turns into a green check for a moment after a click.
+    fn copy_button(&mut self, ui: &mut egui::Ui, id: Id, text: &str, hover_bg: Color32) {
         let p = self.p;
         let copied = self.recently_copied(ui, id);
-        let font = egui::TextStyle::Small.resolve(ui.style());
-        let galley = label.then(|| ui.painter().layout_no_wrap(if copied { "Copied" } else { "Copy" }.into(), font, Color32::PLACEHOLDER));
-        let width = 24.0 + galley.as_ref().map_or(0.0, |g| g.size().x + 6.0);
-        let (rect, resp) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, if copied { "Copied" } else { "Copy" }));
         let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
         let color = if copied {
             p.ok
@@ -752,12 +735,7 @@ impl Launcher<'_> {
         if resp.hovered() {
             ui.painter().rect_filled(rect, 6.0, hover_bg);
         }
-        let icon = Rect::from_center_size(pos2(rect.left() + 12.0, rect.center().y), Vec2::splat(14.0));
-        icons::paint(ui, icon, if copied { Icon::Check } else { Icon::Copy }, color);
-        if let Some(g) = galley {
-            let y = rect.center().y - g.size().y / 2.0;
-            ui.painter().galley(pos2(rect.left() + 24.0, y), g, color);
-        }
+        icons::paint(ui, Rect::from_center_size(rect.center(), Vec2::splat(14.0)), if copied { Icon::Check } else { Icon::Copy }, color);
         if resp.clicked() {
             ui.ctx().copy_text(text.to_string());
             self.copied = Some((id, ui.input(|i| i.time)));
@@ -778,7 +756,7 @@ impl Launcher<'_> {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(if lang.is_empty() { "code" } else { lang }).small().color(p.faint));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        self.copy_button(ui, id, code, false, p.surface);
+                        self.copy_button(ui, id, code, p.surface);
                     });
                 });
                 let theme = egui_extras::syntax_highlighting::CodeTheme::from_style(ui.style());
@@ -1349,7 +1327,17 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).unwrap();
         }
-        let tmp = std::env::temp_dir().join(format!("lokai-snap-{}-{}", std::process::id(), path.display().to_string().replace('/', "_")));
+        let (mut harness, tmp) = harness(&path.display().to_string(), view, fill);
+        harness.run_steps(6);
+        let image = harness.render().expect("render");
+        image.save(path).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The launcher in a test harness, for `view` of a clean session filled in by `fill`.
+    /// Returns it with the temporary directory that holds its config and data.
+    fn harness(name: &str, view: View, fill: impl Fn(&mut State)) -> (Harness<'static>, PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("lokai-snap-{}-{}", std::process::id(), name.replace('/', "_")));
         std::fs::create_dir_all(tmp.join("config/lokai")).unwrap();
         std::fs::write(tmp.join("config/lokai/config.toml"), "server_url = \"http://127.0.0.1:1\"\n").unwrap();
         // SAFETY: set before any other thread reads them; keeps the real config untouched.
@@ -1374,15 +1362,15 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
             st.models = vec![st.config.model.clone(), "Qwen3-Coder-30B-A3B".into()];
             fill(&mut st);
         }
-        let (_tx, rx) = mpsc::channel();
+        let rx: &'static mpsc::Receiver<Cmd> = Box::leak(Box::new(mpsc::channel().1));
         let height = panel_height(view, &core.lock());
         let width = 780.0;
         let mut app: Option<Launcher> = None;
-        let mut harness = Harness::builder()
+        let harness = Harness::builder()
             .with_size(vec2(width + 2.0 * MARGIN, height + 2.0 * MARGIN))
             .with_pixels_per_point(1.5)
             .with_accessibility_check(false)
-            .build_ui(|ui| {
+            .build_ui(move |ui| {
                 let app = app.get_or_insert_with(|| {
                     let ctx = ui.ctx();
                     theme::install_fonts(ctx);
@@ -1396,7 +1384,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
                     );
                     let mut l = Launcher {
                         core: core.clone(),
-                        rx: &rx,
+                        rx,
                         outcome: Box::leak(Box::new(Outcome::Closed)),
                         p,
                         view: View::Chat,
@@ -1428,10 +1416,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
                 });
                 app.draw(ui);
             });
-        harness.run_steps(6);
-        let image = harness.render().expect("render");
-        image.save(path).unwrap();
-        let _ = std::fs::remove_dir_all(&tmp);
+        (harness, tmp)
     }
 
     /// The README screenshots: `just screenshot` writes assets/screenshot.png and screenshot-plot.png.
@@ -1472,7 +1457,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
                     status: ToolStatus::Approval,
                 }),
             ];
-            st.config.height = 712.0;
+            st.config.height = 660.0;
             st.busy = true;
             st.tps = 38.4;
             st.context_tokens = 2914;
@@ -1491,11 +1476,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
         render("math", View::Chat, |st| {
             st.items = vec![
                 Item::User { text: "Explain Euler's identity and the Basel problem".into() },
-                Item::Assistant {
-                    text: MATH_ANSWER.into(),
-                    reasoning: String::new(),
-                    streaming: false,
-                },
+                Item::Assistant { text: MATH_ANSWER.into(), reasoning: String::new(), streaming: false },
             ];
         });
         render("settings-full", View::Settings, |st| {

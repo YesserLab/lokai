@@ -1,0 +1,68 @@
+# nfpm packaging manifest for LoKI. Build all packages with `just package`, which sets $VERSION
+# (from Cargo.toml) and $GLIBC (the newest glibc symbol version the binary uses); nfpm expands
+# the ${...} references below from the environment.
+name: loki
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: utils
+priority: optional
+maintainer: "Yesser Labania <yesserlab@gmail.com>"
+description: |
+  LoKI (lokale künstliche Intelligenz): a launcher-style chat client for AI models
+  running on your own hardware, for KDE Plasma. It can also work on your machine:
+  run shell commands and read, edit and search files, asking for your approval first.
+vendor: "YesserLab"
+homepage: "https://github.com/YesserLab/loki"
+license: "MIT"
+
+# Runtime libraries are loaded with dlopen (EGL, Wayland, xkbcommon), so they are listed here
+# by hand. The package names differ per distro: Debian/Ubuntu here, Fedora and Arch below.
+depends:
+  - libc6 (>= ${GLIBC})
+  - libegl1
+  - libwayland-client0
+  - libwayland-egl1
+  - libxkbcommon0
+  - fontconfig
+  - xdg-utils
+recommends:
+  - wl-clipboard # copied text survives the launcher closing
+  - ripgrep # faster search_files
+
+contents:
+  - src: target/release/loki
+    dst: /usr/bin/loki
+  - src: packaging/loki.desktop
+    dst: /usr/share/applications/loki.desktop
+  - src: assets/loki.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/loki.svg
+  - src: README.md
+    dst: /usr/share/doc/loki/README.md
+  - src: LICENSE
+    dst: /usr/share/licenses/loki/LICENSE
+  - src: assets/lucide/LICENSE
+    dst: /usr/share/licenses/loki/LICENSE.lucide
+
+archlinux:
+  packager: "Yesser Labania <yesserlab@gmail.com>"
+
+overrides:
+  rpm:
+    depends:
+      - glibc >= ${GLIBC}
+      - libglvnd-egl
+      - libwayland-client
+      - libwayland-egl
+      - libxkbcommon
+      - fontconfig
+      - xdg-utils
+  archlinux:
+    depends:
+      - glibc>=${GLIBC}
+      - libglvnd
+      - wayland
+      - libxkbcommon
+      - fontconfig
+      - xdg-utils

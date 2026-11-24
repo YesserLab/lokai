@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=LoKI
+GenericName=Local AI Assistant
+Comment=Chat with your local AI model; it can run commands and edit files
+Exec=loki
+Icon=loki
+Terminal=false
+Categories=Utility;
+Keywords=ai;llm;chat;assistant;ollama;llama;local;
+StartupNotify=false

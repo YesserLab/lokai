@@ -708,7 +708,10 @@ fn system_prompt(cfg: &Config, cwd: &std::path::Path) -> String {
              To launch GUI applications without blocking, use `setsid -f <app> >/dev/null 2>&1`. ",
         );
     }
-    p.push_str("Be concise. Use Markdown, with fenced code blocks for code.\n\nEnvironment:\n");
+    p.push_str(
+        "Be concise. Use Markdown, with fenced code blocks for code. Write math in LaTeX: $...$ inline and $$...$$ for \
+         display formulas; the chat typesets it.\n\nEnvironment:\n",
+    );
     p.push_str(&format!("- User: {}\n", std::env::var("USER").unwrap_or_default()));
     p.push_str(&format!("- Home: {}\n", config::home_dir().display()));
     p.push_str(&format!("- Working directory: {}\n", cwd.display()));

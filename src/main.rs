@@ -7,6 +7,7 @@ mod config;
 mod core;
 mod desktop;
 mod icons;
+mod math;
 mod python;
 mod theme;
 mod tools;

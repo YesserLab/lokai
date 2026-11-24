@@ -137,6 +137,7 @@ fn open(core: &Arc<Core>, rx: &mpsc::Receiver<Cmd>, view: View) -> Outcome {
                 reasoning_open: HashSet::new(),
                 copied: None,
                 images: HashMap::new(),
+                math: Default::default(),
                 sent_history: Vec::new(),
             };
             if view == View::Settings {
@@ -192,6 +193,8 @@ struct Launcher<'a> {
     /// Images shown in the chat: file → (modification time, uri, bytes, width / height).
     /// Reloaded when the file changes.
     images: HashMap<PathBuf, (std::time::SystemTime, String, egui::load::Bytes, f32)>,
+    /// Typeset LaTeX formulas.
+    math: std::rc::Rc<crate::math::MathCache>,
     sent_history: Vec<String>,
 }
 
@@ -693,7 +696,14 @@ impl Launcher<'_> {
             for (k, segment) in split_fences(text).into_iter().enumerate() {
                 match segment {
                     Segment::Markdown(md) => {
-                        CommonMarkViewer::new().show_with_id(Id::unique(("md", idx, k)), ui, &mut self.md, md);
+                        let (math, p) = (self.math.clone(), self.p);
+                        let render_math = move |ui: &mut egui::Ui, tex: &str, inline: bool| math.show(ui, tex, inline, p.text, p.muted);
+                        CommonMarkViewer::new().render_math_fn(Some(&render_math)).show_with_id(
+                            Id::unique(("md", idx, k)),
+                            ui,
+                            &mut self.md,
+                            &crate::math::normalize_delimiters(md),
+                        );
                     }
                     Segment::Code { lang, code } => self.code_snippet(ui, Id::unique(("code", idx, k)), lang, &code),
                 }
@@ -1284,6 +1294,20 @@ mod snapshots {
     use crate::core::{Conn, ToolItem, ToolStatus};
     use egui_kittest::Harness;
 
+    /// An answer with inline and display math in every delimiter style, and one formula that
+    /// can't be typeset.
+    const MATH_ANSWER: &str = r"**Euler's identity** links five constants: $e^{i\pi} + 1 = 0$. It follows from $e^{ix} = \cos x + i \sin x$ at $x = \pi$.
+
+The **Basel problem** asks for the sum of reciprocal squares:
+
+$$\sum_{n=1}^{\infty} \frac{1}{n^2} = \frac{\pi^2}{6} \approx 1.645$$
+
+The same works with \( \zeta(s) \) for even \(s\), and a rotation matrix:
+\[
+R(\theta) = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix}
+\]
+Unsupported LaTeX stays readable: $\frac{1}{$.";
+
     fn render(name: &str, view: View, fill: impl Fn(&mut State)) {
         let dir = std::path::PathBuf::from(std::env::var("LOKI_SNAPSHOT_DIR").unwrap_or_else(|_| "target/snapshots".into()));
         render_to(&dir.join(format!("{name}.png")), view, fill);
@@ -1393,6 +1417,7 @@ mod snapshots {
                         reasoning_open: HashSet::new(),
                         copied: None,
                         images: HashMap::new(),
+                        math: Default::default(),
                         sent_history: Vec::new(),
                     };
                     if view == View::Settings {
@@ -1463,6 +1488,16 @@ mod snapshots {
             st.items.push(Item::User { text: "x".into() });
         });
         render("plot", View::Chat, plot_scene);
+        render("math", View::Chat, |st| {
+            st.items = vec![
+                Item::User { text: "Explain Euler's identity and the Basel problem".into() },
+                Item::Assistant {
+                    text: MATH_ANSWER.into(),
+                    reasoning: String::new(),
+                    streaming: false,
+                },
+            ];
+        });
         render("settings-full", View::Settings, |st| {
             st.items.push(Item::User { text: "x".into() });
             st.config.height = 1250.0;

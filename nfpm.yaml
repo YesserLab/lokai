@@ -46,6 +46,11 @@ contents:
     dst: /usr/share/licenses/loki/LICENSE
   - src: assets/lucide/LICENSE
     dst: /usr/share/licenses/loki/LICENSE.lucide
+  # latex-rust and the STIX Two Math font it embeds
+  - src: packaging/licenses/NOTICE-latex-rust.txt
+    dst: /usr/share/licenses/loki/NOTICE.latex-rust
+  - src: packaging/licenses/OFL-STIX-Two-Math.txt
+    dst: /usr/share/licenses/loki/OFL.stix-two-math
 
 archlinux:
   packager: "Yesser Labania <yesserlab@gmail.com>"

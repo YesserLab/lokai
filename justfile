@@ -60,6 +60,8 @@ stage destdir: build
     install -Dm644 README.md               "$d/usr/share/doc/loki/README.md"
     install -Dm644 LICENSE                 "$d/usr/share/licenses/loki/LICENSE"
     install -Dm644 assets/lucide/LICENSE   "$d/usr/share/licenses/loki/LICENSE.lucide"
+    install -Dm644 packaging/licenses/NOTICE-latex-rust.txt "$d/usr/share/licenses/loki/NOTICE.latex-rust"
+    install -Dm644 packaging/licenses/OFL-STIX-Two-Math.txt "$d/usr/share/licenses/loki/OFL.stix-two-math"
     echo "staged loki into $d"
 
 # Build distro packages (deb, rpm, archlinux) into dist/ with nfpm.

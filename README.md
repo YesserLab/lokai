@@ -6,7 +6,10 @@ hardware: this PC, or another machine on your network. Press a shortcut, ask, an
 streams in. It can also work on your machine: run shell commands and read, edit and search
 files, asking for your approval first.
 
-![LoKI answering a question about disk usage and asking before it runs a command](assets/screenshot.png)
+<p>
+  <img src="assets/screenshot.png" width="49%" alt="LoKI answering a question about disk usage and asking before it runs a command">
+  <img src="assets/screenshot-plot.png" width="49%" alt="LoKI plotting sin(x) and cos(x) and showing the plot in the chat">
+</p>
 
 ## Features
 
@@ -21,8 +24,7 @@ files, asking for your approval first.
   temporary and generated files go, so they don't end up in your home folder
 - Pictures in the chat: ask for a plot or chart, and the model draws it with Python and shows it
   inline, as wide as the chat; click it to open it in your image viewer
-- A Python environment for scripting in the scratch directory, made with uv (or `python3 -m venv`),
-  so packages the model installs never touch your system
+- LaTeX math in answers is typeset
 - Streaming answers with Markdown, syntax-highlighted code blocks with a copy button, and the
   model's reasoning folded away
 - A tray icon with live status (connection and latency, model, tok/s, context size, activity) and
@@ -50,9 +52,9 @@ sudo pacman -U loki-1.1.0-1-x86_64.pkg.tar.zst
 
 Each package installs the `loki` binary, a desktop entry and the icon. They need glibc 2.39 or
 newer: Ubuntu 24.04+, Debian 13+, Fedora 40+, or Arch. LoKI needs a Plasma 6 Wayland session (X11
-isn't supported); the window placement relies on KWin. The packages recommend `uv` for the Python environment,
-`wl-clipboard` so copied text stays on the clipboard after the launcher closes, and `ripgrep` for
-faster searches.
+isn't supported); the window placement relies on KWin. Optionally, LoKI depends on `uv` to make its
+own Python venv for scripts. The packages also recommend `wl-clipboard`, so copied text stays on
+the clipboard after the launcher closes, and `ripgrep` for faster searches.
 
 LoKI doesn't add itself to autostart. To start it with your session, add it in System Settings →
 Autostart and change the command to `loki --background`, which starts it with only the tray icon.
@@ -103,19 +105,6 @@ The tools:
 Commands run as your user, so the approval mode is your safety net. They start in the scratch
 directory, which is also their `$TMPDIR`; open it with the folder button in the footer.
 
-### Python and pictures
-
-LoKI creates a virtual environment at `<scratch>/.venv` when it starts, with `uv venv` if uv is
-installed and `python3 -m venv` otherwise. Commands run with it activated, so the model's
-`python`, `pip` and `uv pip install` use it. Ask for a plot and the model installs matplotlib into
-the environment, saves the plot to the scratch directory and calls `show_image`, which puts the
-picture in the chat:
-
-![LoKI plotting sin(x) and cos(x): it installs matplotlib, writes and runs a script, and shows the plot](assets/screenshot-plot.png)
-
-The system prompt is rebuilt with every message, so a conversation kept across an update or a
-settings change always knows the current tools and environment.
-
 ## How it fits into Plasma
 
 - **Tray**: a StatusNotifierItem. The monochrome icon is an SVG with Plasma's `ColorScheme-Text`
@@ -163,9 +152,10 @@ src/ui.rs          the launcher window (egui)
 src/theme.rs       palette from the KDE color scheme, fonts, logo
 src/icons.rs       Lucide icons
 src/python.rs      the scratch Python environment
+src/math.rs        math typesetting in answers
 src/compat.rs      glibc compatibility shims
 assets/            logo, screenshots and their demo plot, Lucide icons (and their fetch script)
-packaging/         desktop entry
+packaging/         desktop entry, third-party license notices
 nfpm.yaml          package manifest
 justfile           build, test, package recipes
 ```
@@ -177,5 +167,6 @@ MIT, see [LICENSE](LICENSE).
 ## Acknowledgements
 
 Icons by [Lucide](https://lucide.dev) (ISC license, see `assets/lucide/LICENSE`). Built with
-[egui](https://github.com/emilk/egui), [ksni](https://github.com/iovxw/ksni),
-[zbus](https://github.com/dbus2/zbus) and [ureq](https://github.com/algesten/ureq).
+[egui](https://github.com/emilk/egui), [latex-rust](https://github.com/jscarr64/latex-rust) (with
+the STIX Two Math font), [ksni](https://github.com/iovxw/ksni), [zbus](https://github.com/dbus2/zbus)
+and [ureq](https://github.com/algesten/ureq).

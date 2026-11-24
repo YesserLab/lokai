@@ -33,7 +33,7 @@ e2e server:
 snapshots dir="target/snapshots":
     LOKI_SNAPSHOT_DIR={{dir}} cargo test -- --ignored render_snapshots
 
-# Render the README screenshot into assets/screenshot.png.
+# Render the README screenshots into assets/ (screenshot.png, screenshot-plot.png).
 screenshot:
     cargo test -- --ignored readme_screenshot
 

@@ -63,14 +63,23 @@ pub fn definitions() -> Value {
                 "glob": {"type": "string", "description": "Optional filename filter, e.g. '*.py'."},
                 "ignore_case": {"type": "boolean"}
             }, "required": ["pattern"]}
+        }},
+        {"type": "function", "function": {
+            "name": "show_image",
+            "description": "Show an image file (PNG, JPEG or SVG) to the user inline in the chat, e.g. a plot or chart you saved. \
+                For plots, save an SVG (crisp at any size) or a PNG with dpi=150 or more. You can't see the image yourself.",
+            "parameters": {"type": "object", "properties": {
+                "path": {"type": "string", "description": "Absolute path, ~/path, or a path relative to the working directory."},
+                "caption": {"type": "string", "description": "Optional short caption shown under the image."}
+            }, "required": ["path"]}
         }}
     ])
 }
 
-pub const NAMES: [&str; 6] = ["run_command", "read_file", "write_file", "edit_file", "list_directory", "search_files"];
+pub const NAMES: [&str; 7] = ["run_command", "read_file", "write_file", "edit_file", "list_directory", "search_files", "show_image"];
 
 pub fn is_read_only(name: &str) -> bool {
-    matches!(name, "read_file" | "list_directory" | "search_files")
+    matches!(name, "read_file" | "list_directory" | "search_files" | "show_image")
 }
 
 fn s<'a>(args: &'a Value, key: &str) -> &'a str {
@@ -86,6 +95,10 @@ pub fn summarize(name: &str, args: &Value) -> String {
         "edit_file" => s(args, "path").to_string(),
         "list_directory" => args["path"].as_str().unwrap_or(".").to_string(),
         "search_files" => format!("/{}/ in {}", s(args, "pattern"), args["path"].as_str().unwrap_or(".")),
+        "show_image" => match s(args, "caption").trim() {
+            "" => Path::new(s(args, "path")).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            caption => caption.to_string(),
+        },
         _ => args.to_string(),
     }
 }
@@ -99,6 +112,11 @@ pub fn detail(name: &str, args: &Value, cwd: &Path) -> String {
             let minus: Vec<String> = s(args, "old_string").lines().map(|l| format!("- {l}")).collect();
             let plus: Vec<String> = s(args, "new_string").lines().map(|l| format!("+ {l}")).collect();
             format!("{}\n{}", minus.join("\n"), plus.join("\n"))
+        }
+        // The resolved path: the chat shows the image from it.
+        "show_image" => {
+            let p = expand_home(s(args, "path").trim());
+            (if p.is_absolute() { p } else { cwd.join(p) }).display().to_string()
         }
         _ => serde_json::to_string_pretty(args).unwrap_or_default(),
     }
@@ -119,6 +137,8 @@ pub struct Ctx<'a> {
     pub cwd: PathBuf,
     /// `$TMPDIR` for commands (the scratch directory).
     pub tmpdir: PathBuf,
+    /// Python virtual environment that commands run in (activated via PATH and VIRTUAL_ENV).
+    pub venv: Option<PathBuf>,
     pub timeout: Duration,
     pub cancel: &'a AtomicBool,
     /// Process group of the running command (0 = none), so `stop` can kill it.
@@ -141,6 +161,7 @@ pub fn execute(name: &str, args: &Value, ctx: &mut Ctx) -> (String, bool) {
         "edit_file" => edit_file(args, ctx),
         "list_directory" => list_directory(args, ctx),
         "search_files" => search_files(args, ctx),
+        "show_image" => show_image(args, ctx),
         _ => Err(format!("unknown tool '{name}'")),
     };
     match r {
@@ -199,6 +220,14 @@ fn run_process(mut cmd: Command, ctx: &Ctx, timeout: Duration) -> Result<Output,
         .env("NO_COLOR", "1")
         .env("TMPDIR", &ctx.tmpdir)
         .process_group(0);
+    if let Some(venv) = &ctx.venv {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let path = std::env::join_paths(std::iter::once(venv.join("bin")).chain(std::env::split_paths(&path)));
+        cmd.env("VIRTUAL_ENV", venv).env_remove("PYTHONHOME");
+        if let Ok(path) = path {
+            cmd.env("PATH", path);
+        }
+    }
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     let pgid = child.id() as i32;
     ctx.pgid.store(pgid, Ordering::SeqCst);
@@ -355,6 +384,30 @@ fn human_size(n: u64) -> String {
     if i == 0 { format!("{n}B") } else { format!("{v:.1}{}", U[i]) }
 }
 
+/// Largest image file show_image accepts.
+const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+
+/// Checks that the file is an image LoKI can display; the chat then shows it (from the path in
+/// the tool's detail). The model only gets a confirmation, since it can't see pictures.
+fn show_image(args: &Value, ctx: &mut Ctx) -> Result<String, String> {
+    let path = ctx.resolve(s(args, "path"));
+    let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+    if meta.len() > MAX_IMAGE_BYTES {
+        return Err(format!("{} is too large to show ({})", path.display(), human_size(meta.len())));
+    }
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "svg") {
+        return Err(format!("{}: unsupported format; save the image as PNG, JPEG or SVG", path.display()));
+    }
+    let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (w, h) =
+        crate::theme::image_size(&data).ok_or_else(|| format!("{} is not a readable {} image", path.display(), ext.to_uppercase()))?;
+    Ok(format!("Shown to the user: {} ({w}×{h})", path.display()))
+}
+
 fn list_directory(args: &Value, ctx: &mut Ctx) -> Result<String, String> {
     let path = ctx.resolve(args["path"].as_str().unwrap_or("."));
     let mut entries: Vec<(bool, String, String)> = std::fs::read_dir(&path)
@@ -434,7 +487,40 @@ mod tests {
     use super::*;
 
     fn ctx_in<'a>(dir: &Path, cancel: &'a AtomicBool, pgid: &'a AtomicI32) -> Ctx<'a> {
-        Ctx { cwd: dir.to_path_buf(), tmpdir: std::env::temp_dir(), timeout: Duration::from_secs(10), cancel, pgid }
+        Ctx { cwd: dir.to_path_buf(), tmpdir: std::env::temp_dir(), venv: None, timeout: Duration::from_secs(10), cancel, pgid }
+    }
+
+    #[test]
+    fn show_image_checks_the_file() {
+        let dir = std::env::temp_dir().join(format!("loki-show-image-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (cancel, pgid) = (AtomicBool::new(false), AtomicI32::new(0));
+        let mut ctx = ctx_in(&dir, &cancel, &pgid);
+
+        let mut png = resvg::tiny_skia::Pixmap::new(40, 30).unwrap();
+        png.fill(resvg::tiny_skia::Color::WHITE);
+        png.save_png(dir.join("plot.png")).unwrap();
+        let (out, ok) = execute("show_image", &json!({"path": "plot.png", "caption": "A plot"}), &mut ctx);
+        assert!(ok && out.contains("(40×30)"), "{out}");
+        assert_eq!(detail("show_image", &json!({"path": "plot.png"}), &dir), dir.join("plot.png").display().to_string());
+        assert_eq!(summarize("show_image", &json!({"path": "x/plot.png"})), "plot.png");
+        assert_eq!(summarize("show_image", &json!({"path": "plot.png", "caption": "sin(x)"})), "sin(x)");
+
+        std::fs::write(
+            dir.join("plot.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><path d="M0 40h120" stroke="red"/></svg>"#,
+        )
+        .unwrap();
+        let (out, ok) = execute("show_image", &json!({"path": dir.join("plot.svg")}), &mut ctx);
+        assert!(ok && out.contains("(120×80)"), "{out}");
+
+        std::fs::write(dir.join("fake.png"), "not a png").unwrap();
+        assert!(!execute("show_image", &json!({"path": "fake.png"}), &mut ctx).1);
+        std::fs::write(dir.join("plot.bmp"), "x").unwrap();
+        assert!(execute("show_image", &json!({"path": "plot.bmp"}), &mut ctx).0.contains("PNG, JPEG or SVG"));
+        assert!(!execute("show_image", &json!({"path": "missing.png"}), &mut ctx).1);
+        assert!(is_read_only("show_image"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -140,6 +140,16 @@ impl Core {
         let core = Arc::new(Self { state: Mutex::new(state), pgid: Arc::new(AtomicI32::new(0)), repaint: Mutex::new(None), health });
         let c = core.clone();
         std::thread::Builder::new().name("health".into()).spawn(move || c.health_loop(rx)).unwrap();
+        // Have the Python environment ready before the first command needs it.
+        let scratch = core.lock().config.ensure_scratch_dir();
+        std::thread::Builder::new()
+            .name("venv".into())
+            .spawn(move || {
+                if let Err(e) = crate::python::ensure_venv(&scratch) {
+                    eprintln!("loki: no Python environment: {e}");
+                }
+            })
+            .unwrap();
         core
     }
 
@@ -259,10 +269,8 @@ impl Core {
                 return false;
             }
             repair_dangling_tool_calls(&mut st.api);
-            if st.api.is_empty() {
-                let prompt = system_prompt(&st.config, &st.cwd);
-                st.api.push(json!({"role": "system", "content": prompt}));
-            }
+            let prompt = system_prompt(&st.config, &st.cwd);
+            set_system_prompt(&mut st.api, prompt);
             st.api.push(json!({"role": "user", "content": text}));
             st.items.push(Item::User { text: text.to_string() });
             st.busy = true;
@@ -622,6 +630,7 @@ impl Core {
         let mut ctx = tools::Ctx {
             cwd: st.cwd.clone(),
             tmpdir: cfg.ensure_scratch_dir(),
+            venv: (call.name == "run_command").then(|| crate::python::ensure_venv(&cfg.scratch_dir()).ok()).flatten(),
             timeout: Duration::from_secs(cfg.command_timeout_secs.max(1)),
             cancel,
             pgid: &self.pgid,
@@ -666,6 +675,20 @@ fn repair_dangling_tool_calls(api: &mut Vec<Value>) {
     }
 }
 
+/// Puts the current system prompt at the start of the conversation. It's rebuilt on every send,
+/// so a conversation kept across an update or a settings change describes the current setup
+/// (tools, scratch directory, Python environment) instead of the one it started with.
+fn set_system_prompt(api: &mut Vec<Value>, prompt: String) {
+    match api.first_mut() {
+        Some(first) if first["role"] == "system" => {
+            if first["content"] != prompt.as_str() {
+                first["content"] = prompt.into();
+            }
+        }
+        _ => api.insert(0, json!({"role": "system", "content": prompt})),
+    }
+}
+
 fn system_prompt(cfg: &Config, cwd: &std::path::Path) -> String {
     let os = std::fs::read_to_string("/etc/os-release")
         .ok()
@@ -695,9 +718,18 @@ fn system_prompt(cfg: &Config, cwd: &std::path::Path) -> String {
              never in the home directory, unless the user names another location.\n",
             cfg.scratch_dir().display()
         ));
+        if let Some(hint) = crate::python::prompt_hint(&cfg.scratch_dir()) {
+            p.push_str(&hint);
+        }
+        p.push_str(
+            "- Images: to show the user a plot, chart or picture, save it as SVG, PNG or JPEG (in the scratch directory) \
+             and call show_image with its path; it appears inline in the chat.\n",
+        );
     }
     p.push_str(&format!("- System: {os}, kernel {}, {desktop} {session}\n", kernel.trim()));
-    if let Ok(out) = std::process::Command::new("date").arg("+%A, %Y-%m-%d %H:%M %Z").output() {
+    // Only the day: the prompt is re-sent with every message, and a prompt that changes every
+    // minute would make the server re-process the whole conversation each time.
+    if let Ok(out) = std::process::Command::new("date").arg("+%A, %Y-%m-%d").output() {
         p.push_str(&format!("- Date: {}\n", String::from_utf8_lossy(&out.stdout).trim()));
     }
     if !cfg.system_prompt.trim().is_empty() {
@@ -711,6 +743,7 @@ fn system_prompt(cfg: &Config, cwd: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn repairs_unanswered_tool_calls() {
@@ -725,6 +758,22 @@ mod tests {
         assert_eq!(api[3]["tool_call_id"], "b");
         repair_dangling_tool_calls(&mut api);
         assert_eq!(api.len(), 4);
+    }
+
+    #[test]
+    fn system_prompt_is_refreshed() {
+        let mut api = vec![json!({"role": "system", "content": "old"}), json!({"role": "user", "content": "hi"})];
+        set_system_prompt(&mut api, "new".into());
+        assert_eq!(api.len(), 2);
+        assert_eq!(api[0]["content"], "new");
+        let mut api = Vec::new();
+        set_system_prompt(&mut api, "first".into());
+        assert_eq!(api, vec![json!({"role": "system", "content": "first"})]);
+        // A history saved without a system prompt gets one in front.
+        let mut api = vec![json!({"role": "user", "content": "hi"})];
+        set_system_prompt(&mut api, "p".into());
+        assert_eq!(api[0]["role"], "system");
+        assert_eq!(api[1]["role"], "user");
     }
 
     #[test]
@@ -745,88 +794,45 @@ mod tests {
         assert!(matches!(back.items[1], Item::Tool(ToolItem { status: ToolStatus::Done, .. })));
     }
 
-    /// Generated files land in the scratch directory, not in home (real server, fake HOME):
-    /// `LOKI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_scratch`
-    #[test]
-    #[ignore]
-    fn agent_scratch() {
+    /// A Core living in a throwaway home (HOME and the XDG directories under $TMPDIR), connected to
+    /// `$LOKI_TEST_SERVER` with a model selected. Returns it with the temporary directory.
+    fn agent_core(name: &str, approval: Approval) -> (Arc<Core>, PathBuf) {
         let server = std::env::var("LOKI_TEST_SERVER").expect("set LOKI_TEST_SERVER");
-        let tmp = std::env::temp_dir().join(format!("loki-scratch-{}", std::process::id()));
-        let home = tmp.join("home");
-        std::fs::create_dir_all(&home).unwrap();
-        // SAFETY: single-threaded at this point; fake HOME/XDG dirs keep the user's real files untouched.
+        let tmp = std::env::temp_dir().join(format!("loki-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(tmp.join("home")).unwrap();
+        // SAFETY: single-threaded at this point; the fake directories keep the user's real files untouched.
         unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("XDG_CONFIG_HOME", tmp.join("config"));
-            std::env::set_var("XDG_DATA_HOME", tmp.join("data"));
-            std::env::set_var("XDG_RUNTIME_DIR", tmp.join("run"));
-        }
-        let core = Core::new();
-        {
-            let mut st = core.lock();
-            st.config.server_url = server;
-            st.config.approval = Approval::AutoAll;
-            st.config.keep_history = false;
-        }
-        let scratch = core.lock().config.scratch_dir();
-        assert_eq!(core.lock().cwd, scratch);
-        let start = Instant::now();
-        while core.lock().config.model.is_empty() {
-            assert!(start.elapsed() < Duration::from_secs(15), "no model: {}", core.lock().conn_detail);
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        assert!(core.send("Write a small Python script that prints the first 5 square numbers, run it, and tell me the output."));
-        while core.lock().busy {
-            assert!(start.elapsed() < Duration::from_secs(300), "timed out");
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        for item in &core.lock().items {
-            if let Item::Tool(t) = item {
-                println!("TOOL {} [{:?}] {}", t.name, t.status, t.summary);
+            std::env::set_var("HOME", tmp.join("home"));
+            for (var, dir) in
+                [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache"), ("XDG_RUNTIME_DIR", "run")]
+            {
+                std::env::set_var(var, tmp.join(dir));
             }
         }
-        let in_scratch: Vec<_> = std::fs::read_dir(&scratch).unwrap().flatten().map(|e| e.file_name()).collect();
-        let in_home: Vec<_> = std::fs::read_dir(&home).unwrap().flatten().map(|e| e.file_name()).collect();
-        println!("scratch: {in_scratch:?}\nhome: {in_home:?}");
-        assert!(!in_scratch.is_empty(), "nothing was written to the scratch directory");
-        assert!(in_home.iter().all(|n| n.to_string_lossy().starts_with('.')), "files were written to home: {in_home:?}");
-        std::fs::remove_dir_all(&tmp).unwrap();
-    }
-
-    /// End-to-end against a real server:
-    /// `LOKI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_e2e`
-    #[test]
-    #[ignore]
-    fn agent_e2e() {
-        let server = std::env::var("LOKI_TEST_SERVER").expect("set LOKI_TEST_SERVER");
-        let tmp = std::env::temp_dir().join(format!("loki-e2e-{}", std::process::id()));
-        let work = tmp.join("work");
-        std::fs::create_dir_all(&work).unwrap();
-        // SAFETY: single-threaded at this point; keeps the user's real config/history untouched.
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", tmp.join("config"));
-            std::env::set_var("XDG_DATA_HOME", tmp.join("data"));
-        }
         let core = Core::new();
         {
             let mut st = core.lock();
             st.config.server_url = server;
-            st.config.approval = Approval::Ask;
-            st.config.working_dir = work.display().to_string();
-            st.cwd = work.clone();
+            st.config.approval = approval;
+            st.config.keep_history = false;
+            st.config.command_timeout_secs = 300;
         }
+        core.check_connection();
         let start = Instant::now();
         while core.lock().config.model.is_empty() {
             assert!(start.elapsed() < Duration::from_secs(15), "no model: {}", core.lock().conn_detail);
             std::thread::sleep(Duration::from_millis(100));
         }
-        assert!(core.send(
-            "Create notes.txt containing 'hello from loki', change 'hello' to 'goodbye' with edit_file, \
-             read it back, run `uname -s`, then answer in one short sentence."
-        ));
-        let mut approvals = 0;
+        (core, tmp)
+    }
+
+    /// Sends `prompt`, allows every tool call that asks, and waits for the answer. Prints the
+    /// conversation and returns how many approvals were needed.
+    fn run_agent(core: &Arc<Core>, prompt: &str, timeout: Duration) -> usize {
+        assert!(core.send(prompt));
+        let (start, mut approvals) = (Instant::now(), 0);
         while core.lock().busy {
-            assert!(start.elapsed() < Duration::from_secs(300), "timed out");
+            assert!(start.elapsed() < timeout, "timed out");
             let pending = core.lock().pending_approval();
             if let Some(id) = pending {
                 approvals += 1;
@@ -834,14 +840,103 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        let st = core.lock();
-        for item in &st.items {
+        for item in &core.lock().items {
             match item {
-                Item::Tool(t) => println!("TOOL {} [{:?}] {} -> {}", t.name, t.status, t.summary, t.output.lines().next().unwrap_or("")),
-                Item::Assistant { text, reasoning, .. } => println!("ASSISTANT ({} chars reasoning): {text}", reasoning.len()),
+                Item::Tool(t) => println!("TOOL {} [{:?}] {} -> {}", t.name, t.status, t.summary, t.output.lines().last().unwrap_or("")),
+                Item::Assistant { text, .. } => println!("ASSISTANT: {text}"),
                 other => println!("{other:?}"),
             }
         }
+        approvals
+    }
+
+    /// Plotting end to end, in a conversation that started under an older build (its system prompt
+    /// knows nothing about the Python environment or show_image, so it must be refreshed): the model
+    /// installs matplotlib into LoKI's venv and shows the plot. Downloads matplotlib:
+    /// `LOKI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_plot`
+    #[test]
+    #[ignore]
+    fn agent_plot() {
+        let (core, tmp) = agent_core("plot", Approval::AutoAll);
+        {
+            let mut st = core.lock();
+            st.api = vec![
+                json!({"role": "system", "content": "You are LoKI, a capable assistant. Be concise."}),
+                json!({"role": "user", "content": "Hi"}),
+                json!({"role": "assistant", "content": "Hello! How can I help?"}),
+            ];
+        }
+        run_agent(&core, "Plot the function sin(x)", Duration::from_secs(600));
+        let st = core.lock();
+        assert!(st.api[0]["content"].as_str().unwrap().contains("show_image"), "system prompt not refreshed");
+        let shown = st
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Tool(t) if t.name == "show_image" && t.status == ToolStatus::Done => Some(PathBuf::from(&t.detail)),
+                _ => None,
+            })
+            .expect("no successful show_image call");
+        let scratch = st.config.scratch_dir();
+        assert!(shown.starts_with(&scratch), "image outside scratch: {}", shown.display());
+        // matplotlib went into LoKI's environment, and the model didn't make one of its own
+        let venv = crate::python::venv_dir(&scratch);
+        let has_mpl = std::fs::read_dir(venv.join("lib")).unwrap().flatten().any(|d| d.path().join("site-packages/matplotlib").is_dir());
+        assert!(has_mpl, "matplotlib is not installed in {}", venv.display());
+        let other_venvs: Vec<_> = std::fs::read_dir(&scratch)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path() != venv && e.path().join("pyvenv.cfg").is_file())
+            .map(|e| e.file_name())
+            .collect();
+        assert!(other_venvs.is_empty(), "the model created its own venv: {other_venvs:?}");
+        drop(st);
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// Generated files land in the scratch directory, not in home:
+    /// `LOKI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_scratch`
+    #[test]
+    #[ignore]
+    fn agent_scratch() {
+        let (core, tmp) = agent_core("scratch", Approval::AutoAll);
+        let scratch = core.lock().config.scratch_dir();
+        assert_eq!(core.lock().cwd, scratch);
+        run_agent(
+            &core,
+            "Write a small Python script that prints the first 5 square numbers, run it, and tell me the output.",
+            Duration::from_secs(300),
+        );
+        let names = |dir: &Path| -> Vec<String> {
+            std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()
+        };
+        let (in_scratch, in_home) = (names(&scratch), names(&tmp.join("home")));
+        println!("scratch: {in_scratch:?}\nhome: {in_home:?}");
+        assert!(in_scratch.iter().any(|n| n != ".venv"), "nothing was written to the scratch directory");
+        assert!(in_home.iter().all(|n| n.starts_with('.')), "files were written to home: {in_home:?}");
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// Writing, editing, reading and running, each asking for approval:
+    /// `LOKI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_e2e`
+    #[test]
+    #[ignore]
+    fn agent_e2e() {
+        let (core, tmp) = agent_core("e2e", Approval::Ask);
+        let work = tmp.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        {
+            let mut st = core.lock();
+            st.config.working_dir = work.display().to_string();
+            st.cwd = work.clone();
+        }
+        let approvals = run_agent(
+            &core,
+            "Create notes.txt containing 'hello from loki', change 'hello' to 'goodbye' with edit_file, \
+             read it back, run `uname -s`, then answer in one short sentence.",
+            Duration::from_secs(300),
+        );
+        let st = core.lock();
         println!("tps={:.1} ctx={} conn={:?} latency={:?} approvals={approvals}", st.tps, st.context_tokens, st.conn, st.latency_ms);
         assert!(!st.items.iter().any(|i| matches!(i, Item::Error { .. })));
         assert!(st.items.iter().any(|i| matches!(i, Item::Tool(t) if t.name == "edit_file" && t.status == ToolStatus::Done)));

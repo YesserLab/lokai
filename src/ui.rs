@@ -12,7 +12,8 @@ use eframe::egui::{
     RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, UiBuilder, Vec2, pos2, vec2,
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -135,6 +136,7 @@ fn open(core: &Arc<Core>, rx: &mpsc::Receiver<Cmd>, view: View) -> Outcome {
                 expanded: HashSet::new(),
                 reasoning_open: HashSet::new(),
                 copied: None,
+                images: HashMap::new(),
                 sent_history: Vec::new(),
             };
             if view == View::Settings {
@@ -187,6 +189,9 @@ struct Launcher<'a> {
     reasoning_open: HashSet<usize>,
     /// The copy button that was clicked last, and when.
     copied: Option<(Id, f64)>,
+    /// Images shown in the chat: file → (modification time, uri, bytes, width / height).
+    /// Reloaded when the file changes.
+    images: HashMap<PathBuf, (std::time::SystemTime, String, egui::load::Bytes, f32)>,
     sent_history: Vec<String>,
 }
 
@@ -288,7 +293,7 @@ impl Launcher<'_> {
                     self.view = View::Chat;
                     self.focus_input = true;
                 }
-                Action::OpenScratch => desktop::open_folder(&self.core.lock().config.ensure_scratch_dir()),
+                Action::OpenScratch => desktop::open_path(&self.core.lock().config.ensure_scratch_dir()),
                 Action::TestConnection => {
                     if let Some(cfg) = self.draft.clone() {
                         self.testing = true;
@@ -612,6 +617,7 @@ impl Launcher<'_> {
                         });
                     }
                     Item::Assistant { text, reasoning, streaming } => self.assistant(ui, idx, text, reasoning, *streaming),
+                    Item::Tool(t) if t.name == "show_image" && t.status == ToolStatus::Done => self.image_block(ui, t),
                     Item::Tool(t) => self.tool_card(ui, t, actions),
                     Item::Error { text } => {
                         Frame::new()
@@ -772,6 +778,67 @@ impl Launcher<'_> {
                 });
             });
         ui.add_space(2.0);
+    }
+
+    /// The image a `show_image` call displayed: fitted to the width, click to open it in a viewer.
+    fn image_block(&mut self, ui: &mut egui::Ui, t: &ToolItem) {
+        let p = self.p;
+        let path = PathBuf::from(&t.detail);
+        let Some((source, aspect)) = self.image_source(ui.ctx(), &path) else {
+            ui.horizontal(|ui| {
+                icons::show(ui, Icon::Warning, 14.0, p.faint);
+                ui.label(RichText::new(format!("Image no longer available: {}", collapse_home(&path))).small().color(p.faint));
+            });
+            return;
+        };
+        // As wide as the chat; only a picture that would then be taller than the visible part of
+        // the chat is scaled down, so it can always be seen whole.
+        let width = ui.available_width();
+        let max_height = (ui.clip_rect().height() - 90.0).max(160.0); // room for the caption
+        let size = if width / aspect > max_height { vec2(max_height * aspect, max_height) } else { vec2(width, width / aspect) };
+        let image = egui::Image::new(source).fit_to_exact_size(size).corner_radius(8).sense(Sense::click());
+        let resp = ui
+            .add(image)
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!("{} · click to open", collapse_home(&path)));
+        if resp.clicked() {
+            desktop::open_path(&path);
+        }
+        if !t.summary.is_empty() {
+            ui.add_space(-4.0);
+            ui.label(RichText::new(&t.summary).small().color(p.muted));
+        }
+    }
+
+    /// Bytes of an image file for egui and its width/height ratio, cached until the file changes
+    /// (a redrawn plot shows up).
+    fn image_source(&mut self, ctx: &egui::Context, path: &Path) -> Option<(egui::ImageSource<'static>, f32)> {
+        let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+        if let Some((m, uri, bytes, aspect)) = self.images.get(path)
+            && *m == modified
+        {
+            return Some((egui::ImageSource::Bytes { uri: uri.clone().into(), bytes: bytes.clone() }, *aspect));
+        }
+        let data = std::fs::read(path).ok()?;
+        let (w, h) = theme::image_size(&data)?;
+        let aspect = w / h;
+        let ext = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+            Some("svg") => "svg",
+            Some("jpg" | "jpeg") => "jpg",
+            _ => "png",
+        };
+        let stamp = modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let uri = format!("bytes://loki-image/{:x}-{stamp}.{ext}", {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            path.hash(&mut h);
+            h.finish()
+        });
+        let bytes = egui::load::Bytes::from(data);
+        if let Some((_, old, _, _)) = self.images.insert(path.to_path_buf(), (modified, uri.clone(), bytes.clone(), aspect)) {
+            ctx.forget_image(&old);
+        }
+        Some((egui::ImageSource::Bytes { uri: uri.into(), bytes }, aspect))
     }
 
     fn tool_card(&mut self, ui: &mut egui::Ui, t: &ToolItem, actions: &mut Vec<Action>) {
@@ -1065,7 +1132,7 @@ impl Launcher<'_> {
                         .on_hover_text("Temporary and generated files go here ($TMPDIR for commands)");
                         let open = Button::image_and_text(Icon::FolderOpen.image(p.text).fit_to_exact_size(vec2(14.0, 14.0)), "Open");
                         if ui.add(open).on_hover_text("Open in the file manager").clicked() {
-                            desktop::open_folder(&d.ensure_scratch_dir());
+                            desktop::open_path(&d.ensure_scratch_dir());
                         }
                     });
                     ui.end_row();
@@ -1222,6 +1289,36 @@ mod snapshots {
         render_to(&dir.join(format!("{name}.png")), view, fill);
     }
 
+    /// Asking for a plot: the model installs matplotlib, writes and runs a script, and shows the
+    /// result (assets/demo-plot.svg, made with matplotlib).
+    fn plot_scene(st: &mut State) {
+        let tool = |id: &str, name: &str, summary: &str, detail: String| {
+            Item::Tool(ToolItem {
+                id: id.into(),
+                name: name.into(),
+                summary: summary.into(),
+                detail,
+                output: String::new(),
+                status: ToolStatus::Done,
+            })
+        };
+        let plot = std::env::current_dir().unwrap().join("assets/demo-plot.svg");
+        st.items = vec![
+            Item::User { text: "Plot sin(x) and cos(x) from −2π to 2π".into() },
+            tool("p1", "run_command", "uv pip install matplotlib", "$ uv pip install matplotlib".into()),
+            tool("p2", "write_file", "plot_trig.py (24 lines)", String::new()),
+            tool("p3", "run_command", "python plot_trig.py", "$ python plot_trig.py".into()),
+            tool("p4", "show_image", "sin(x) and cos(x) on [−2π, 2π]", plot.display().to_string()),
+            Item::Assistant {
+                text: "Here are **sin(x)** and **cos(x)** over [−2π, 2π]. The cosine is the sine shifted left by π/2.".into(),
+                reasoning: String::new(),
+                streaming: false,
+            },
+        ];
+        st.tps = 41.2;
+        st.context_tokens = 3874;
+    }
+
     /// Renders one view of a clean session: fresh config and data directories, and a server
     /// address nobody listens on, so nothing real (server, models, history) shows up in the image.
     fn render_to(path: &std::path::Path, view: View, fill: impl Fn(&mut State)) {
@@ -1295,6 +1392,7 @@ mod snapshots {
                         expanded: HashSet::new(),
                         reasoning_open: HashSet::new(),
                         copied: None,
+                        images: HashMap::new(),
                         sent_history: Vec::new(),
                     };
                     if view == View::Settings {
@@ -1311,12 +1409,16 @@ mod snapshots {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// The README screenshot: `just screenshot` writes assets/screenshot.png.
+    /// The README screenshots: `just screenshot` writes assets/screenshot.png and screenshot-plot.png.
     #[test]
     #[ignore]
     fn readme_screenshot() {
-        let path = std::path::PathBuf::from(std::env::var("LOKI_SCREENSHOT").unwrap_or_else(|_| "assets/screenshot.png".into()));
-        render_to(&path, View::Chat, |st| {
+        let dir = PathBuf::from(std::env::var("LOKI_SCREENSHOT_DIR").unwrap_or_else(|_| "assets".into()));
+        render_to(&dir.join("screenshot-plot.png"), View::Chat, |st| {
+            plot_scene(st);
+            st.config.height = 776.0;
+        });
+        render_to(&dir.join("screenshot.png"), View::Chat, |st| {
             st.items = vec![
                 Item::User { text: "Why is my disk almost full?".into() },
                 Item::Assistant { text: String::new(), reasoning: "Check which folders in home are the largest.".into(), streaming: false },
@@ -1360,6 +1462,7 @@ mod snapshots {
         render("settings", View::Settings, |st| {
             st.items.push(Item::User { text: "x".into() });
         });
+        render("plot", View::Chat, plot_scene);
         render("settings-full", View::Settings, |st| {
             st.items.push(Item::User { text: "x".into() });
             st.config.height = 1250.0;

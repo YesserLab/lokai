@@ -19,6 +19,10 @@ files, asking for your approval first.
   choose when it asks: before every tool, only before tools that change something, or never.
 - A scratch directory (`~/.local/share/loki/scratch` by default) where commands start and where
   temporary and generated files go, so they don't end up in your home folder
+- Pictures in the chat: ask for a plot or chart, and the model draws it with Python and shows it
+  inline, as wide as the chat; click it to open it in your image viewer
+- A Python environment for scripting in the scratch directory, made with uv (or `python3 -m venv`),
+  so packages the model installs never touch your system
 - Streaming answers with Markdown, syntax-highlighted code blocks with a copy button, and the
   model's reasoning folded away
 - A tray icon with live status (connection and latency, model, tok/s, context size, activity) and
@@ -45,9 +49,10 @@ sudo pacman -U loki-1.0.2-1-x86_64.pkg.tar.zst
 ```
 
 Each package installs the `loki` binary, a desktop entry and the icon. They need glibc 2.39 or
-newer: Ubuntu 24.04+, Debian 13+, Fedora 40+, or Arch. LoKI is made for a Plasma 6 session; the
-window placement relies on KWin. `wl-clipboard` is recommended so copied text stays on the
-clipboard after the launcher closes.
+newer: Ubuntu 24.04+, Debian 13+, Fedora 40+, or Arch. LoKI needs a Plasma 6 Wayland session (X11
+isn't supported); the window placement relies on KWin. The packages recommend `uv` for the Python environment,
+`wl-clipboard` so copied text stays on the clipboard after the launcher closes, and `ripgrep` for
+faster searches.
 
 LoKI doesn't add itself to autostart. To start it with your session, add it in System Settings →
 Autostart and change the command to `loki --background`, which starts it with only the tray icon.
@@ -93,9 +98,23 @@ The tools:
 | `edit_file` | no | exact string replacement (unique unless `replace_all`) |
 | `list_directory` | yes | |
 | `search_files` | yes | ripgrep, falling back to grep |
+| `show_image` | yes | shows a PNG, JPEG or SVG file inline in the chat |
 
 Commands run as your user, so the approval mode is your safety net. They start in the scratch
 directory, which is also their `$TMPDIR`; open it with the folder button in the footer.
+
+### Python and pictures
+
+LoKI creates a virtual environment at `<scratch>/.venv` when it starts, with `uv venv` if uv is
+installed and `python3 -m venv` otherwise. Commands run with it activated, so the model's
+`python`, `pip` and `uv pip install` use it. Ask for a plot and the model installs matplotlib into
+the environment, saves the plot to the scratch directory and calls `show_image`, which puts the
+picture in the chat:
+
+![LoKI plotting sin(x) and cos(x): it installs matplotlib, writes and runs a script, and shows the plot](assets/screenshot-plot.png)
+
+The system prompt is rebuilt with every message, so a conversation kept across an update or a
+settings change always knows the current tools and environment.
 
 ## How it fits into Plasma
 
@@ -125,7 +144,7 @@ just run          # build and run
 just test         # unit tests and clippy
 just e2e http://127.0.0.1:8080   # agent runs against a real server
 just snapshots    # render the launcher into PNGs (target/snapshots)
-just screenshot   # render the README screenshot (assets/screenshot.png)
+just screenshot   # render the README screenshots (assets/screenshot*.png)
 just package      # build deb/rpm/archlinux packages into dist/
 just stage DIR    # install the files into DIR (e.g. a package root)
 just icons        # download the Lucide icons again
@@ -143,8 +162,9 @@ src/desktop.rs     D-Bus service, global shortcut, KWin placement, tray
 src/ui.rs          the launcher window (egui)
 src/theme.rs       palette from the KDE color scheme, fonts, logo
 src/icons.rs       Lucide icons
+src/python.rs      the scratch Python environment
 src/compat.rs      glibc compatibility shims
-assets/            logo, screenshot, Lucide icons (and their fetch script)
+assets/            logo, screenshots and their demo plot, Lucide icons (and their fetch script)
 packaging/         desktop entry
 nfpm.yaml          package manifest
 justfile           build, test, package recipes

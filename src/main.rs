@@ -7,6 +7,7 @@ mod config;
 mod core;
 mod desktop;
 mod icons;
+mod python;
 mod theme;
 mod tools;
 mod ui;
@@ -49,6 +50,12 @@ fn main() {
     // Single instance: hand the request to the running one.
     if desktop::forward(if method.is_empty() { "Ping" } else { method }) || method == "Quit" {
         return;
+    }
+
+    // The window only speaks Wayland (KDE Plasma 6); X11 isn't supported.
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        eprintln!("loki: LoKI needs a Wayland session (WAYLAND_DISPLAY is not set)");
+        std::process::exit(1);
     }
 
     let core = core::Core::new();

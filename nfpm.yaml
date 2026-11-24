@@ -30,6 +30,8 @@ depends:
 recommends:
   - wl-clipboard # copied text survives the launcher closing
   - ripgrep # faster search_files
+  - uv # creates the scratch Python environment and installs packages into it
+  - python3-venv # fallback for the scratch Python environment without uv
 
 contents:
   - src: target/release/loki
@@ -58,6 +60,11 @@ overrides:
       - libxkbcommon
       - fontconfig
       - xdg-utils
+    recommends:
+      - wl-clipboard
+      - ripgrep
+      - uv
+      - python3
   archlinux:
     depends:
       - glibc>=${GLIBC}
@@ -66,3 +73,8 @@ overrides:
       - libxkbcommon
       - fontconfig
       - xdg-utils
+    recommends:
+      - wl-clipboard
+      - ripgrep
+      - uv
+      - python

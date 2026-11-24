@@ -244,6 +244,18 @@ pub fn render_png(data: &[u8], size: u32) -> Option<Vec<u8>> {
     Some(straight_rgba(&pixmap))
 }
 
+/// Width and height of a PNG, JPEG or SVG image (from the image header, or the SVG's size).
+pub fn image_size(data: &[u8]) -> Option<(f32, f32)> {
+    let (w, h) = match image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().ok()?.into_dimensions() {
+        Ok((w, h)) => (w as f32, h as f32),
+        Err(_) => {
+            let size = resvg::usvg::Tree::from_data(data, &resvg::usvg::Options::default()).ok()?.size();
+            (size.width(), size.height())
+        }
+    };
+    (w > 0.0 && h > 0.0).then_some((w, h))
+}
+
 fn straight_rgba(pixmap: &resvg::tiny_skia::Pixmap) -> Vec<u8> {
     pixmap
         .pixels()
@@ -258,4 +270,17 @@ fn straight_rgba(pixmap: &resvg::tiny_skia::Pixmap) -> Vec<u8> {
 /// RGBA → ARGB32 (network byte order), the StatusNotifierItem pixmap format.
 pub fn rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
     rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_sizes() {
+        let png = resvg::tiny_skia::Pixmap::new(300, 100).unwrap().encode_png().unwrap();
+        assert_eq!(image_size(&png), Some((300.0, 100.0)));
+        assert_eq!(image_size(br#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="400"/>"#), Some((200.0, 400.0)));
+        assert_eq!(image_size(b"not an image"), None);
+    }
 }

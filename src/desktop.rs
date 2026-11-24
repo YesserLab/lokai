@@ -453,10 +453,10 @@ pub fn spawn_tray(core: Arc<Core>, cmd: Commander) {
         .unwrap();
 }
 
-/// Opens a folder in the user's file manager.
-pub fn open_folder(dir: &std::path::Path) {
+/// Opens a file or folder with its default application (file manager, image viewer, …).
+pub fn open_path(path: &std::path::Path) {
     use std::process::{Command, Stdio};
-    if let Ok(mut child) = Command::new("xdg-open").arg(dir).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+    if let Ok(mut child) = Command::new("xdg-open").arg(path).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
         std::thread::spawn(move || child.wait());
     }
 }

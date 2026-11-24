@@ -26,6 +26,8 @@ const PAD: Vec2 = vec2(18.0, 14.0);
 const COMPACT_HEIGHT: f32 = 176.0;
 const PROMPT_MARGIN: Margin = Margin { left: 10, right: 5, top: 5, bottom: 5 };
 const GAP: f32 = 10.0;
+/// How long Esc has to be held to stop a running reply (a tap closes the window).
+const ESC_HOLD: f64 = 0.6;
 
 const SUGGESTIONS: [&str; 3] = ["What's filling up my home folder?", "Any errors since boot?", "Which packages can be updated?"];
 
@@ -136,6 +138,7 @@ fn open(core: &Arc<Core>, rx: &mpsc::Receiver<Cmd>, view: View) -> Outcome {
                 expanded: HashSet::new(),
                 reasoning_open: HashSet::new(),
                 copied: None,
+                esc_hold: None,
                 images: HashMap::new(),
                 math: Default::default(),
                 sent_history: Vec::new(),
@@ -190,6 +193,8 @@ struct Launcher<'a> {
     reasoning_open: HashSet<usize>,
     /// The copy button that was clicked last, and when.
     copied: Option<(Id, f64)>,
+    /// Esc went down while a reply was running: when, and whether holding it already stopped it.
+    esc_hold: Option<(f64, bool)>,
     /// Images shown in the chat: file → (modification time, uri, bytes, width / height).
     /// Reloaded when the file changes.
     images: HashMap<PathBuf, (std::time::SystemTime, String, egui::load::Bytes, f32)>,
@@ -271,7 +276,10 @@ impl Launcher<'_> {
                         }
                     }
                 }
-                Action::Stop => self.core.stop(),
+                Action::Stop => {
+                    self.core.stop();
+                    self.focus_input = true; // ready to type the next message
+                }
                 Action::NewChat => {
                     self.core.new_chat();
                     self.expanded.clear();
@@ -363,14 +371,25 @@ impl Launcher<'_> {
 
         // Keyboard shortcuts.
         ctx.input_mut(|i| {
-            if i.consume_key(Modifiers::NONE, Key::Escape) {
-                actions.push(if self.view == View::Settings {
-                    Action::CloseSettings
-                } else if st.busy {
-                    Action::Stop
+            // Esc closes the window; a running reply goes on in the background. Holding Esc while
+            // a reply runs stops it instead (and then letting go doesn't close the window).
+            if i.consume_key(Modifiers::NONE, Key::Escape) && self.esc_hold.is_none() {
+                if st.busy {
+                    self.esc_hold = Some((i.time, false));
                 } else {
-                    Action::Close
-                });
+                    actions.push(Action::Close);
+                }
+            }
+            if let Some((since, stopped)) = self.esc_hold {
+                if !i.key_down(Key::Escape) {
+                    self.esc_hold = None;
+                    if !stopped {
+                        actions.push(Action::Close);
+                    }
+                } else if !stopped && i.time - since >= ESC_HOLD {
+                    self.esc_hold = Some((since, true));
+                    actions.push(Action::Stop);
+                }
             }
             if i.consume_key(Modifiers::COMMAND, Key::N) {
                 actions.push(Action::NewChat);
@@ -467,7 +486,7 @@ fn check(ui: &mut egui::Ui, p: &Palette, value: &mut bool, text: &str) -> Respon
 }
 
 /// Circular icon button (send / stop).
-fn round_button(ui: &mut egui::Ui, p: &Palette, enabled: bool, stop: bool, tip: &str) -> bool {
+fn round_button(ui: &mut egui::Ui, p: &Palette, enabled: bool, stop: bool, tip: &str) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(34.0, 34.0), if enabled { Sense::click() } else { Sense::hover() });
     let fill = match (enabled, resp.hovered(), stop) {
         (false, _, _) => p.surface2,
@@ -480,7 +499,7 @@ fn round_button(ui: &mut egui::Ui, p: &Palette, enabled: bool, stop: bool, tip: 
     ui.painter().circle_filled(rect.center(), 17.0, fill);
     let (icon, size) = if stop { (Icon::Square, 15.0) } else { (Icon::ArrowUp, 19.0) };
     icons::paint(ui, Rect::from_center_size(rect.center(), Vec2::splat(size)), icon, fg);
-    resp.on_hover_text(tip).clicked()
+    resp.on_hover_text(tip)
 }
 
 fn code_block(ui: &mut egui::Ui, p: &Palette, id: impl std::hash::Hash + std::fmt::Debug, text: &str, color: Color32, max_h: f32) {
@@ -530,7 +549,7 @@ impl Launcher<'_> {
                 let hint = if approval.is_some() {
                     "Press Enter to allow the pending tool call…"
                 } else if st.busy {
-                    "Working… (Esc to stop)"
+                    "Working… (hold Esc to stop)"
                 } else {
                     "Ask anything…"
                 };
@@ -560,10 +579,24 @@ impl Launcher<'_> {
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if st.busy {
-                        if round_button(ui, &p, true, true, "Stop (Esc)") {
+                        let stop = round_button(ui, &p, true, true, "Stop (hold Esc)");
+                        if stop.clicked() {
                             actions.push(Action::Stop);
                         }
-                    } else if round_button(ui, &p, !self.input.trim().is_empty(), false, "Send (Enter)") {
+                        // While Esc is held, a ring fills around the stop button.
+                        if let Some((since, false)) = self.esc_hold {
+                            let t = ((ui.input(|i| i.time) - since) / ESC_HOLD).clamp(0.0, 1.0) as f32;
+                            let (c, r) = (stop.rect.center(), 19.5);
+                            let points: Vec<Pos2> = (0..=48)
+                                .map(|k| {
+                                    let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * t * k as f32 / 48.0;
+                                    c + vec2(a.cos(), a.sin()) * r
+                                })
+                                .collect();
+                            ui.painter().add(egui::Shape::line(points, Stroke::new(2.5, p.err)));
+                            ui.ctx().request_repaint();
+                        }
+                    } else if round_button(ui, &p, !self.input.trim().is_empty(), false, "Send (Enter)").clicked() {
                         actions.push(Action::Send(self.input.clone()));
                     }
                 });
@@ -1327,7 +1360,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).unwrap();
         }
-        let (mut harness, tmp) = harness(&path.display().to_string(), view, fill);
+        let (mut harness, tmp, _) = harness(&path.display().to_string(), view, fill);
         harness.run_steps(6);
         let image = harness.render().expect("render");
         image.save(path).unwrap();
@@ -1335,8 +1368,8 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
     }
 
     /// The launcher in a test harness, for `view` of a clean session filled in by `fill`.
-    /// Returns it with the temporary directory that holds its config and data.
-    fn harness(name: &str, view: View, fill: impl Fn(&mut State)) -> (Harness<'static>, PathBuf) {
+    /// Returns it with the temporary directory that holds its config and data, and its core.
+    fn harness(name: &str, view: View, fill: impl Fn(&mut State)) -> (Harness<'static>, PathBuf, Arc<Core>) {
         let tmp = std::env::temp_dir().join(format!("lokai-snap-{}-{}", std::process::id(), name.replace('/', "_")));
         std::fs::create_dir_all(tmp.join("config/lokai")).unwrap();
         std::fs::write(tmp.join("config/lokai/config.toml"), "server_url = \"http://127.0.0.1:1\"\n").unwrap();
@@ -1366,6 +1399,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
         let height = panel_height(view, &core.lock());
         let width = 780.0;
         let mut app: Option<Launcher> = None;
+        let ui_core = core.clone();
         let harness = Harness::builder()
             .with_size(vec2(width + 2.0 * MARGIN, height + 2.0 * MARGIN))
             .with_pixels_per_point(1.5)
@@ -1383,7 +1417,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
                         Default::default(),
                     );
                     let mut l = Launcher {
-                        core: core.clone(),
+                        core: ui_core.clone(),
                         rx,
                         outcome: Box::leak(Box::new(Outcome::Closed)),
                         p,
@@ -1404,6 +1438,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
                         expanded: HashSet::new(),
                         reasoning_open: HashSet::new(),
                         copied: None,
+                        esc_hold: None,
                         images: HashMap::new(),
                         math: Default::default(),
                         sent_history: Vec::new(),
@@ -1416,7 +1451,32 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
                 });
                 app.draw(ui);
             });
-        (harness, tmp)
+        (harness, tmp, core)
+    }
+
+    /// While a reply runs, tapping Esc only closes the window (the reply goes on); holding it stops
+    /// the reply.
+    #[test]
+    fn esc_tap_closes_and_hold_stops() {
+        let (mut h, tmp, core) = harness("keys", View::Chat, |st| {
+            st.items = vec![Item::User { text: "A question".into() }];
+            st.busy = true;
+        });
+        h.run_steps(2);
+        h.key_press(Key::Escape); // down and up in the same frame: a tap
+        h.run_steps(2);
+        assert!(core.lock().busy, "tapping Esc stopped the reply");
+        let prompt = Id::unique("prompt");
+        h.ctx.memory_mut(|m| m.surrender_focus(prompt));
+        h.run_steps(1);
+        assert!(!h.ctx.memory(|m| m.has_focus(prompt)));
+        h.key_down(Key::Escape);
+        h.run_steps(4); // 0.25 s per step
+        assert!(!core.lock().busy, "holding Esc didn't stop the reply");
+        h.key_up(Key::Escape);
+        h.run_steps(2);
+        assert!(h.ctx.memory(|m| m.has_focus(prompt)), "the input field isn't focused after stopping");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The README screenshots: `just screenshot` writes assets/screenshot.png and screenshot-plot.png.
@@ -1473,6 +1533,18 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
             st.items.push(Item::User { text: "x".into() });
         });
         render("plot", View::Chat, plot_scene);
+        // Holding Esc during a reply: the ring around the stop button fills up.
+        let (mut h, tmp, _) = harness("holding-esc", View::Chat, |st| {
+            st.items = vec![Item::User { text: "A long question".into() }];
+            st.busy = true;
+            st.status = "Generating…".into();
+        });
+        h.run_steps(2);
+        h.key_down(Key::Escape);
+        h.run_steps(2); // 0.5 s of the 0.6 s
+        let dir = PathBuf::from(std::env::var("LOKAI_SNAPSHOT_DIR").unwrap_or_else(|_| "target/snapshots".into()));
+        h.render().expect("render").save(dir.join("holding-esc.png")).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
         render("math", View::Chat, |st| {
             st.items = vec![
                 Item::User { text: "Explain Euler's identity and the Basel problem".into() },

@@ -70,7 +70,8 @@ from the footer.
 | Enter / Shift+Enter | send / new line |
 | Enter (prompt empty) | allow the pending tool call |
 | ↑ / ↓ | recall previous prompts |
-| Esc | stop the reply, leave settings, or close |
+| Esc | close the window (a reply keeps running) |
+| Esc (hold) | stop the reply |
 | Ctrl+N | clear the session |
 | Ctrl+, | settings |
 

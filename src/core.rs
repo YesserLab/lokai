@@ -717,8 +717,9 @@ fn system_prompt(cfg: &Config, cwd: &std::path::Path) -> String {
     p.push_str(&format!("- Working directory: {}\n", cwd.display()));
     if cfg.tools_enabled {
         p.push_str(&format!(
-            "- Scratch directory: {} (also $TMPDIR). Put temporary, intermediate and generated files (scripts, downloads, outputs) here, \
-             never in the home directory, unless the user names another location.\n",
+            "- Scratch directory: {} (also $TMPDIR). Put temporary, intermediate and generated files (scripts, downloads, outputs, \
+             unpacked dumps) here, unless the user names another location. Never use /tmp: don't write files there and don't \
+             cd into it. Don't put such files in the home directory either.\n",
             cfg.scratch_dir().display()
         ));
         if let Some(hint) = crate::python::prompt_hint(&cfg.scratch_dir()) {

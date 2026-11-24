@@ -215,26 +215,11 @@ fn monochrome_svg(color: &str) -> String {
     svg
 }
 
-/// Renders an SVG into ARGB32 pixmaps (the StatusNotifierItem format).
-fn rasterize(svg: &str) -> Vec<ksni::Icon> {
-    use resvg::{tiny_skia, usvg};
-    let Ok(tree) = usvg::Tree::from_str(svg, &usvg::Options::default()) else { return Vec::new() };
+/// StatusNotifierItem pixmaps (ARGB32) at every tray size, from an RGBA renderer.
+fn pixmaps(render: impl Fn(u32) -> Option<Vec<u8>>) -> Vec<ksni::Icon> {
     TRAY_SIZES
         .iter()
-        .filter_map(|&size| {
-            let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
-            let scale = size as f32 / tree.size().width().max(tree.size().height());
-            resvg::render(&tree, tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
-            let data = pixmap
-                .pixels()
-                .iter()
-                .flat_map(|p| {
-                    let c = p.demultiply();
-                    [c.alpha(), c.red(), c.green(), c.blue()]
-                })
-                .collect();
-            Some(ksni::Icon { width: size as i32, height: size as i32, data })
-        })
+        .filter_map(|&size| Some(ksni::Icon { width: size as i32, height: size as i32, data: crate::theme::rgba_to_argb(&render(size)?) }))
         .collect()
 }
 
@@ -243,55 +228,60 @@ impl TrayArt {
         format!("{:?}|{}", cfg.tray_icon, cfg.tray_icon_custom.trim())
     }
 
+    /// Plasma only finds icon files that were in our icon directory when the tray registered, so
+    /// only the monochrome icon (which Plasma must recolor) goes by name, and its file is written
+    /// on every start. The color logo and custom image files are sent as pixmaps, which Plasma
+    /// redraws whenever they change.
     fn new(cfg: &crate::config::Config) -> Self {
         use crate::config::TrayIcon;
         let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("loki/tray");
-        let _ = std::fs::create_dir_all(&dir);
-        let write = |name: &str, data: &[u8]| std::fs::write(dir.join(name), data).is_ok();
-        let logo =
-            || TRAY_SIZES.iter().map(|&s| ksni::Icon { width: s as i32, height: s as i32, data: crate::theme::icon_argb(s) }).collect();
-        let key = Self::key(cfg);
+        let mono = Self::write_monochrome(&dir);
+        let logo = || pixmaps(|s| Some(crate::theme::icon_rgba(s)));
         let custom = cfg.tray_icon_custom.trim();
-        let (name, pixmaps): (String, Vec<ksni::Icon>) = match cfg.tray_icon {
+        let (name, pixmaps) = match cfg.tray_icon {
             TrayIcon::Custom if !custom.is_empty() => {
                 let path = crate::config::expand_home(custom);
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
                 if path.is_file() && matches!(ext.as_str(), "svg" | "png") {
-                    // A fresh name per file version, so Plasma doesn't show a cached copy.
-                    use std::hash::{Hash, Hasher};
-                    let mut h = std::collections::hash_map::DefaultHasher::new();
-                    (&path, std::fs::metadata(&path).and_then(|m| m.modified()).ok()).hash(&mut h);
-                    let name = format!("loki-custom-{:x}", h.finish());
                     let data = std::fs::read(&path).unwrap_or_default();
-                    write(&format!("{name}.{ext}"), &data);
-                    let pixmaps = if ext == "svg" { rasterize(&String::from_utf8_lossy(&data)) } else { Vec::new() };
-                    (name, if pixmaps.is_empty() { logo() } else { pixmaps })
+                    let images = if ext == "svg" {
+                        pixmaps(|s| crate::theme::render_svg(&String::from_utf8_lossy(&data), s))
+                    } else {
+                        pixmaps(|s| crate::theme::render_png(&data, s))
+                    };
+                    (String::new(), if images.is_empty() { logo() } else { images })
                 } else {
-                    (custom.to_string(), logo()) // an icon from the icon theme
+                    (custom.to_string(), logo()) // an icon from the icon theme, looked up by Plasma
                 }
             }
-            TrayIcon::Color => {
-                write("loki-color.svg", include_bytes!("../assets/loki.svg"));
-                ("loki-color".into(), logo())
-            }
-            TrayIcon::Monochrome | TrayIcon::Custom => {
-                let color = if crate::theme::Palette::detect().dark { "#fcfcfc" } else { "#232629" };
-                let svg = monochrome_svg(color);
-                // The content hash in the name keeps Plasma from showing an older cached version.
-                use std::hash::{Hash, Hasher};
-                let mut h = std::collections::hash_map::DefaultHasher::new();
-                svg.hash(&mut h);
-                let name = format!("loki-mono-{:x}", h.finish());
-                if let Ok(entries) = std::fs::read_dir(&dir) {
-                    for e in entries.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("loki-mono")) {
-                        let _ = std::fs::remove_file(e.path());
-                    }
-                }
-                write(&format!("{name}.svg"), svg.as_bytes());
-                (name, rasterize(&svg))
-            }
+            TrayIcon::Color => (String::new(), logo()),
+            TrayIcon::Monochrome | TrayIcon::Custom => mono,
         };
-        Self { key, name, dir: dir.to_string_lossy().into_owned(), pixmaps }
+        Self { key: Self::key(cfg), name, dir: dir.to_string_lossy().into_owned(), pixmaps }
+    }
+
+    /// Writes the monochrome SVG (named after its content, so Plasma never shows a stale cached
+    /// copy) and removes older versions. Returns its icon name and fallback pixmaps.
+    fn write_monochrome(dir: &std::path::Path) -> (String, Vec<ksni::Icon>) {
+        use std::hash::{Hash, Hasher};
+        let color = if crate::theme::Palette::detect().dark { "#fcfcfc" } else { "#232629" };
+        let svg = monochrome_svg(color);
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        svg.hash(&mut h);
+        let name = format!("loki-mono-{:x}", h.finish());
+        let _ = std::fs::create_dir_all(dir);
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for e in entries.flatten() {
+                if e.file_name().to_string_lossy() != format!("{name}.svg") {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+        let file = dir.join(format!("{name}.svg"));
+        if !file.is_file() {
+            let _ = std::fs::write(&file, svg.as_bytes());
+        }
+        (name, pixmaps(|s| crate::theme::render_svg(&svg, s)))
     }
 }
 
@@ -514,29 +504,44 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("loki-tray-{}", std::process::id()));
         // SAFETY: test-only; nothing else reads XDG_RUNTIME_DIR in this test binary.
         unsafe { std::env::set_var("XDG_RUNTIME_DIR", &tmp) };
+        let opaque = |art: &TrayArt| art.pixmaps.len() == TRAY_SIZES.len() && art.pixmaps[0].data.chunks(4).any(|c| c[0] > 200);
         let mut cfg = crate::config::Config::default();
+
+        // Monochrome: an SVG file that Plasma recolors, every shape carrying the color class.
         let mono = TrayArt::new(&cfg);
-        assert!(mono.name.starts_with("loki-mono-"));
+        assert!(mono.name.starts_with("loki-mono-") && opaque(&mono));
         let svg = std::fs::read_to_string(tmp.join(format!("loki/tray/{}.svg", mono.name))).unwrap();
         assert!(svg.contains(r#"id="current-color-scheme""#));
-        // every shape carries the color class itself (Qt doesn't inherit currentColor from <svg>)
         assert_eq!(
             svg.matches("<path ").count(),
             svg.matches(r#"<path class="ColorScheme-Text" style="fill:none;stroke:currentColor""#).count()
         );
-        assert_eq!(mono.pixmaps.len(), TRAY_SIZES.len());
-        // the outline is drawn (some opaque pixels), the background is transparent
-        let px = &mono.pixmaps[0].data;
-        assert!(px.chunks(4).any(|c| c[0] > 200) && px.chunks(4).any(|c| c[0] == 0));
+
+        // Color and custom files: pixmaps only, and the monochrome file is still there for a switch back.
+        cfg.tray_icon = crate::config::TrayIcon::Color;
+        let color = TrayArt::new(&cfg);
+        assert!(color.name.is_empty() && opaque(&color));
+        assert!(tmp.join(format!("loki/tray/{}.svg", mono.name)).is_file());
 
         cfg.tray_icon = crate::config::TrayIcon::Custom;
+        let svg_file = tmp.join("mine.svg");
+        std::fs::write(&svg_file, crate::icons::Icon::Bot.svg().replace("currentColor", "#ff0000")).unwrap();
+        cfg.tray_icon_custom = svg_file.to_string_lossy().into();
+        let custom = TrayArt::new(&cfg);
+        assert!(custom.name.is_empty() && opaque(&custom));
+        assert!(custom.pixmaps[0].data.chunks(4).any(|c| c[0] > 200 && c[1] > 200 && c[2] < 50)); // red
+
+        let png_file = tmp.join("mine.png");
+        let mut png = resvg::tiny_skia::Pixmap::new(8, 8).unwrap();
+        png.fill(resvg::tiny_skia::Color::from_rgba8(0, 0, 255, 255));
+        png.save_png(&png_file).unwrap();
+        cfg.tray_icon_custom = png_file.to_string_lossy().into();
+        let custom = TrayArt::new(&cfg);
+        assert!(custom.name.is_empty() && custom.pixmaps[0].data.chunks(4).all(|c| c == [255, 0, 0, 255])); // blue, opaque
+
+        // An icon theme name goes to Plasma by name.
         cfg.tray_icon_custom = "utilities-terminal".into();
         assert_eq!(TrayArt::new(&cfg).name, "utilities-terminal");
-        let file = tmp.join("mine.svg");
-        std::fs::write(&file, crate::icons::Icon::Bot.svg()).unwrap();
-        cfg.tray_icon_custom = file.to_string_lossy().into();
-        let custom = TrayArt::new(&cfg);
-        assert!(custom.name.starts_with("loki-custom-") && tmp.join(format!("loki/tray/{}.svg", custom.name)).is_file());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

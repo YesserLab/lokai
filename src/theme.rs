@@ -215,44 +215,47 @@ fn system_fallback(req: &egui::epaint::text::FallbackRequest<'_>) -> Option<egui
     })
 }
 
-/// The LoKI icon (accent squircle with a white sparkle), rendered at `size`×`size` as RGBA.
+/// The LoKI icon (assets/loki.svg: Lucide's bot outline in the LoKI gradient), as `size`×`size` RGBA.
 pub fn icon_rgba(size: u32) -> Vec<u8> {
-    let (c1, c2) = ([0x8b, 0x7c, 0xff], [0x3d, 0xae, 0xe9]);
-    let mut out = Vec::with_capacity((size * size * 4) as usize);
-    const SS: u32 = 4;
-    for py in 0..size {
-        for px in 0..size {
-            let (mut cover, mut star) = (0.0f32, 0.0f32);
-            for sy in 0..SS {
-                for sx in 0..SS {
-                    let x = ((px * SS + sx) as f32 + 0.5) / (size * SS) as f32 * 2.0 - 1.0;
-                    let y = ((py * SS + sy) as f32 + 0.5) / (size * SS) as f32 * 2.0 - 1.0;
-                    if x.abs().powi(4) + y.abs().powi(4) <= 0.94f32.powi(4) {
-                        cover += 1.0;
-                        // astroid sparkle, slightly offset small one in the corner
-                        let big = (x.abs().powf(2.0 / 3.0) + (y + 0.04).abs().powf(2.0 / 3.0)) <= 0.62f32.powf(2.0 / 3.0);
-                        let (dx, dy) = (x - 0.45, y + 0.45);
-                        let small = (dx.abs().powf(2.0 / 3.0) + dy.abs().powf(2.0 / 3.0)) <= 0.2f32.powf(2.0 / 3.0);
-                        if big || small {
-                            star += 1.0;
-                        }
-                    }
-                }
-            }
-            let n = (SS * SS) as f32;
-            let t = (px + py) as f32 / (2 * size) as f32;
-            let bg: Vec<f32> = (0..3).map(|i| c1[i] as f32 + (c2[i] as f32 - c1[i] as f32) * t).collect();
-            let s = if cover > 0.0 { star / cover } else { 0.0 };
-            for b in &bg {
-                out.push((b + (255.0 - b) * s).round() as u8);
-            }
-            out.push((cover / n * 255.0).round() as u8);
-        }
-    }
-    out
+    render_svg(include_str!("../assets/loki.svg"), size).expect("the bundled icon is valid SVG")
 }
 
-/// ARGB32 (network byte order) for the StatusNotifierItem pixmap.
-pub fn icon_argb(size: u32) -> Vec<u8> {
-    icon_rgba(size).as_chunks::<4>().0.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect()
+/// Renders an SVG into a `size`×`size` image (straight-alpha RGBA).
+pub fn render_svg(svg: &str, size: u32) -> Option<Vec<u8>> {
+    use resvg::{tiny_skia, usvg};
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    let (w, h) = (tree.size().width(), tree.size().height());
+    let scale = size as f32 / w.max(h);
+    let offset = ((size as f32 - w * scale) / 2.0, (size as f32 - h * scale) / 2.0);
+    resvg::render(&tree, tiny_skia::Transform::from_scale(scale, scale).post_translate(offset.0, offset.1), &mut pixmap.as_mut());
+    Some(straight_rgba(&pixmap))
+}
+
+/// Decodes a PNG and scales it into a `size`×`size` image (straight-alpha RGBA).
+pub fn render_png(data: &[u8], size: u32) -> Option<Vec<u8>> {
+    use resvg::tiny_skia;
+    let src = tiny_skia::Pixmap::decode_png(data).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    let scale = size as f32 / src.width().max(src.height()) as f32;
+    let offset = ((size as f32 - src.width() as f32 * scale) / 2.0, (size as f32 - src.height() as f32 * scale) / 2.0);
+    let paint = tiny_skia::PixmapPaint { quality: tiny_skia::FilterQuality::Bicubic, ..Default::default() };
+    pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, tiny_skia::Transform::from_scale(scale, scale).post_translate(offset.0, offset.1), None);
+    Some(straight_rgba(&pixmap))
+}
+
+fn straight_rgba(pixmap: &resvg::tiny_skia::Pixmap) -> Vec<u8> {
+    pixmap
+        .pixels()
+        .iter()
+        .flat_map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        })
+        .collect()
+}
+
+/// RGBA → ARGB32 (network byte order), the StatusNotifierItem pixmap format.
+pub fn rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
+    rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect()
 }

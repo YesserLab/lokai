@@ -119,19 +119,12 @@ just              # list recipes
 just build        # build target/release/loki (thin LTO, stripped)
 just run          # build and run
 just test         # unit tests and clippy
-just e2e http://192.168.0.171:8080   # agent runs against a real server
+just e2e http://127.0.0.1:8080   # agent runs against a real server
 just snapshots    # render the launcher into PNGs (target/snapshots)
 just package      # build deb/rpm/archlinux packages into dist/
 just stage DIR    # install the files into DIR (e.g. a package root)
 just icons        # download the Lucide icons again
 ```
-
-The recipes build with `--remap-path-prefix`, so the binary contains no local paths (your home
-directory becomes `~`, the checkout `.`); build release packages through `just`, not plain
-`cargo build`. `just package` also checks that the binary needs no newer glibc than 2.39, so the packages run
-on every distribution listed above. Building on a newer system is fine: glibc 2.43 gave `acosf`
-and `atan2f` new symbol versions, and `src/compat.rs` defines both so the binary keeps using
-the old ones.
 
 ## Layout
 

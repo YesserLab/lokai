@@ -38,13 +38,13 @@ Download a package for your distribution from the
 
 ```sh
 # Debian / Ubuntu
-sudo apt install ./lokai_1.2.1_amd64.deb
+sudo apt install ./lokai_1.2.2_amd64.deb
 
 # Fedora
-sudo dnf install ./lokai-1.2.1-1.x86_64.rpm
+sudo dnf install ./lokai-1.2.2-1.x86_64.rpm
 
 # Arch / Manjaro
-sudo pacman -U lokai-1.2.1-1-x86_64.pkg.tar.zst
+sudo pacman -U lokai-1.2.2-1-x86_64.pkg.tar.zst
 ```
 
 Each package installs the `lokai` binary, a desktop entry and the icon. They need glibc 2.39 or

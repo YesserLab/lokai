@@ -8,8 +8,8 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
 
-pub const BUS_NAME: &str = "org.loki.LoKI";
-const OBJ_PATH: &str = "/org/loki/LoKI";
+pub const BUS_NAME: &str = "org.lokai.LoKAI";
+const OBJ_PATH: &str = "/org/lokai/LoKAI";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cmd {
@@ -46,7 +46,7 @@ struct Service {
     cmd: Commander,
 }
 
-#[zbus::interface(name = "org.loki.LoKI")]
+#[zbus::interface(name = "org.lokai.LoKAI")]
 impl Service {
     fn toggle(&self) {
         self.cmd.send(Cmd::Toggle);
@@ -84,18 +84,18 @@ pub fn serve(cmd: Commander) -> zbus::Result<Connection> {
 
 // ---------------------------------------------------------------- global shortcut
 
-const COMPONENT: &str = "loki";
+const COMPONENT: &str = "lokai";
 // Qt key codes: Qt::MetaModifier | Qt::AltModifier | Qt::Key_Space
 const DEFAULT_KEY: i32 = 0x1000_0000 | 0x0800_0000 | 0x20;
 
-/// Registers "Toggle LoKI" with KGlobalAccel (default Meta+Alt+Space, changeable in
+/// Registers "Toggle LoKAI" with KGlobalAccel (default Meta+Alt+Space, changeable in
 /// System Settings → Keyboard → Shortcuts) and toggles the launcher when it fires.
 pub fn spawn_shortcut(cmd: Commander) {
     std::thread::Builder::new()
         .name("shortcut".into())
         .spawn(move || {
             if let Err(e) = shortcut_loop(&cmd) {
-                eprintln!("loki: global shortcut unavailable: {e}");
+                eprintln!("lokai: global shortcut unavailable: {e}");
             }
         })
         .unwrap();
@@ -104,7 +104,7 @@ pub fn spawn_shortcut(cmd: Commander) {
 fn shortcut_loop(cmd: &Commander) -> zbus::Result<()> {
     let conn = Connection::session()?;
     let accel = Proxy::new(&conn, "org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel")?;
-    let id = vec![COMPONENT, "toggle", "LoKI", "Toggle LoKI"];
+    let id = vec![COMPONENT, "toggle", "LoKAI", "Toggle LoKAI"];
     accel.call_method("doRegister", &(&id,))?;
     // QKeySequence travels as (ai). Flags: 1 = IsDefault, 2 = SetPresent (keeps a user-changed key).
     let keys = vec![(vec![DEFAULT_KEY, 0, 0, 0],)];
@@ -122,7 +122,7 @@ fn shortcut_loop(cmd: &Commander) -> zbus::Result<()> {
 
 const PLACE_SCRIPT: &str = r#"
 (function () {
-    const w = workspace.windowList().filter(c => c.resourceClass === "loki" || c.resourceName === "loki").pop();
+    const w = workspace.windowList().filter(c => c.resourceClass === "lokai" || c.resourceName === "lokai").pop();
     if (w) {
         const output = workspace.screenAt(workspace.cursorPos) || workspace.activeScreen;
         // Centered on the screen under the cursor; re-centered whenever the launcher changes size.
@@ -143,11 +143,11 @@ const PLACE_SCRIPT: &str = r#"
         w.skipSwitcher = true;
         workspace.activeWindow = w;
     }
-    callDBus("org.loki.LoKI", "/org/loki/LoKI", "org.loki.LoKI", "Placed", !!w);
+    callDBus("org.lokai.LoKAI", "/org/lokai/LoKAI", "org.lokai.LoKAI", "Placed", !!w);
 })();
 "#;
 
-const PLACE_PLUGIN: &str = "loki-place";
+const PLACE_PLUGIN: &str = "lokai-place";
 
 fn kwin_scripting(conn: &Connection) -> zbus::Result<Proxy<'_>> {
     Proxy::new(conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting")
@@ -159,7 +159,7 @@ fn kwin_scripting(conn: &Connection) -> zbus::Result<Proxy<'_>> {
 pub fn place_window() -> bool {
     let run = || -> zbus::Result<()> {
         let path =
-            std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("loki-place.js");
+            std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("lokai-place.js");
         std::fs::write(&path, PLACE_SCRIPT).map_err(|e| zbus::Error::Failure(e.to_string()))?;
         let conn = Connection::session()?;
         let scripting = kwin_scripting(&conn)?;
@@ -235,7 +235,7 @@ impl TrayArt {
     fn new(cfg: &crate::config::Config) -> Self {
         use crate::config::TrayIcon;
         // Plasma reads IconThemePath like an icon theme: <dir>/hicolor/scalable/apps/<name>.svg.
-        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("loki/icons");
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("lokai/icons");
         let mono = Self::write_monochrome(&dir.join("hicolor/scalable/apps"));
         let logo = || pixmaps(|s| Some(crate::theme::icon_rgba(s)));
         let custom = cfg.tray_icon_custom.trim();
@@ -264,14 +264,14 @@ impl TrayArt {
     /// Writes the monochrome SVG into `apps_dir` and removes older versions. Returns its icon name
     /// and fallback pixmaps. The name is derived from the content, so Plasma never shows a stale
     /// cached copy, and has no dashes: Plasma falls back from "a-b-c" to "a-b" and "a" when a name
-    /// isn't found, and "loki" would be the app icon.
+    /// isn't found, and "lokai" would be the app icon.
     fn write_monochrome(dir: &std::path::Path) -> (String, Vec<ksni::Icon>) {
         use std::hash::{Hash, Hasher};
         let color = if crate::theme::Palette::detect().dark { "#fcfcfc" } else { "#232629" };
         let svg = monochrome_svg(color);
         let mut h = std::collections::hash_map::DefaultHasher::new();
         svg.hash(&mut h);
-        let name = format!("loki_mono_{:x}", h.finish());
+        let name = format!("lokai_mono_{:x}", h.finish());
         let _ = std::fs::create_dir_all(dir);
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
@@ -331,11 +331,11 @@ impl ksni::Tray for Tray {
     const MENU_ON_ACTIVATE: bool = true;
 
     fn id(&self) -> String {
-        "loki".into()
+        "lokai".into()
     }
 
     fn title(&self) -> String {
-        "LoKI".into()
+        "LoKAI".into()
     }
 
     fn icon_name(&self) -> String {
@@ -357,7 +357,7 @@ impl ksni::Tray for Tray {
         if st.busy {
             description.push_str(&format!("\n{}", if st.status.is_empty() { "Working…" } else { &st.status }));
         }
-        ksni::ToolTip { title: "LoKI".into(), description, ..Default::default() }
+        ksni::ToolTip { title: "LoKAI".into(), description, ..Default::default() }
     }
 
     fn secondary_activate(&mut self, _x: i32, _y: i32) {
@@ -405,7 +405,7 @@ pub fn spawn_tray(core: Arc<Core>, cmd: Commander) {
     let handle = match (Tray { core: core.clone(), cmd, art }).spawn() {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("loki: tray icon unavailable: {e}");
+            eprintln!("lokai: tray icon unavailable: {e}");
             return;
         }
     };
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn tray_art() {
-        let tmp = std::env::temp_dir().join(format!("loki-tray-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("lokai-tray-{}", std::process::id()));
         // SAFETY: test-only; nothing else reads XDG_RUNTIME_DIR in this test binary.
         unsafe { std::env::set_var("XDG_RUNTIME_DIR", &tmp) };
         let opaque = |art: &TrayArt| art.pixmaps.len() == TRAY_SIZES.len() && art.pixmaps[0].data.chunks(4).any(|c| c[0] > 200);
@@ -512,9 +512,9 @@ mod tests {
 
         // Monochrome: an SVG file that Plasma recolors, every shape carrying the color class.
         let mono = TrayArt::new(&cfg);
-        assert!(mono.name.starts_with("loki_mono_") && !mono.name.contains('-') && opaque(&mono));
-        assert_eq!(std::path::Path::new(&mono.dir), tmp.join("loki/icons"));
-        let svg = std::fs::read_to_string(tmp.join(format!("loki/icons/hicolor/scalable/apps/{}.svg", mono.name))).unwrap();
+        assert!(mono.name.starts_with("lokai_mono_") && !mono.name.contains('-') && opaque(&mono));
+        assert_eq!(std::path::Path::new(&mono.dir), tmp.join("lokai/icons"));
+        let svg = std::fs::read_to_string(tmp.join(format!("lokai/icons/hicolor/scalable/apps/{}.svg", mono.name))).unwrap();
         assert!(svg.contains(r#"id="current-color-scheme""#));
         assert_eq!(
             svg.matches("<path ").count(),
@@ -525,7 +525,7 @@ mod tests {
         cfg.tray_icon = crate::config::TrayIcon::Color;
         let color = TrayArt::new(&cfg);
         assert!(color.name.is_empty() && opaque(&color));
-        assert!(tmp.join(format!("loki/icons/hicolor/scalable/apps/{}.svg", mono.name)).is_file());
+        assert!(tmp.join(format!("lokai/icons/hicolor/scalable/apps/{}.svg", mono.name)).is_file());
 
         cfg.tray_icon = crate::config::TrayIcon::Custom;
         let svg_file = tmp.join("mine.svg");
@@ -556,11 +556,11 @@ mod tests {
         assert!(WlCopy::available());
         let ctx = egui::Context::default();
         ctx.add_plugin(WlCopy);
-        let mut out = ctx.run_ui(Default::default(), |ui| ui.ctx().copy_text("loki clipboard test".into()));
+        let mut out = ctx.run_ui(Default::default(), |ui| ui.ctx().copy_text("lokai clipboard test".into()));
         out.textures_delta.clear();
         assert!(!out.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(_))));
         std::thread::sleep(Duration::from_millis(300));
         let pasted = std::process::Command::new("wl-paste").arg("-n").output().unwrap();
-        assert_eq!(String::from_utf8_lossy(&pasted.stdout), "loki clipboard test");
+        assert_eq!(String::from_utf8_lossy(&pasted.stdout), "lokai clipboard test");
     }
 }

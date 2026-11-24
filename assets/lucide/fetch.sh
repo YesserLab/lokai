@@ -1,5 +1,5 @@
 #!/bin/sh
-# Downloads the Lucide icons LoKI uses from lucide.dev (ISC license, see LICENSE).
+# Downloads the Lucide icons LoKAI uses from lucide.dev (ISC license, see LICENSE).
 set -e
 cd "$(dirname "$0")"
 for name in settings trash folder-open check x ban triangle-exclamation-point circle-exclamation-point copy arrow-up square \

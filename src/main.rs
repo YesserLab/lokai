@@ -1,4 +1,4 @@
-//! LoKI (lokale künstliche Intelligenz) — a launcher-style chat client for local AI models,
+//! LoKAI (lokale KI, local AI) — a launcher-style chat client for local AI models,
 //! with tools, for KDE Plasma.
 
 mod api;
@@ -16,9 +16,9 @@ mod ui;
 use desktop::{Cmd, Commander};
 
 const HELP: &str = "\
-LoKI (lokale künstliche Intelligenz) — chat with your local AI model from a launcher window.
+LoKAI (lokale KI, local AI) — chat with your local AI model from a launcher window.
 
-Usage: loki [OPTION]
+Usage: lokai [OPTION]
 
   (no option)    start (or show the running instance's chat)
   --background   start with only the tray icon (for autostart)
@@ -27,8 +27,8 @@ Usage: loki [OPTION]
   --quit         quit the running instance
   -h, --help     show this help
 
-The chat toggles with Meta+Alt+Space (change it in System Settings → Keyboard → Shortcuts → LoKI).
-Settings live in ~/.config/loki/config.toml.";
+The chat toggles with Meta+Alt+Space (change it in System Settings → Keyboard → Shortcuts → LoKAI).
+Settings live in ~/.config/lokai/config.toml.";
 
 fn main() {
     let arg = std::env::args().nth(1);
@@ -43,7 +43,7 @@ fn main() {
             return;
         }
         Some(other) => {
-            eprintln!("loki: unknown option {other}\n\n{HELP}");
+            eprintln!("lokai: unknown option {other}\n\n{HELP}");
             std::process::exit(2);
         }
     };
@@ -55,7 +55,7 @@ fn main() {
 
     // The window only speaks Wayland (KDE Plasma 6); X11 isn't supported.
     if std::env::var_os("WAYLAND_DISPLAY").is_none() {
-        eprintln!("loki: LoKI needs a Wayland session (WAYLAND_DISPLAY is not set)");
+        eprintln!("lokai: LoKAI needs a Wayland session (WAYLAND_DISPLAY is not set)");
         std::process::exit(1);
     }
 
@@ -65,7 +65,7 @@ fn main() {
     let _bus = match desktop::serve(cmd.clone()) {
         Ok(conn) => Some(conn),
         Err(e) => {
-            eprintln!("loki: D-Bus service unavailable ({e}); --toggle and window placement won't work");
+            eprintln!("lokai: D-Bus service unavailable ({e}); --toggle and window placement won't work");
             None
         }
     };

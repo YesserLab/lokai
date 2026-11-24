@@ -1,14 +1,13 @@
-# LoKI
+# LoKAI
 
-LoKI stands for *lokale künstliche Intelligenz*, German for "local artificial intelligence". It is
-a launcher-style chat client for KDE Plasma that talks only to AI models running on your own
-hardware: this PC, or another machine on your network. Press a shortcut, ask, and the answer
-streams in. It can also work on your machine: run shell commands and read, edit and search
-files, asking for your approval first.
+LoKAI is a launcher-style chat client for KDE Plasma that talks only to AI models running on your
+own hardware: this PC, or another machine on your network. Press a shortcut, ask, and the answer
+streams in. It can also work on your machine: run shell commands and read, edit and search files,
+asking for your approval first.
 
 <p>
-  <img src="assets/screenshot.png" width="49%" alt="LoKI answering a question about disk usage and asking before it runs a command">
-  <img src="assets/screenshot-plot.png" width="49%" alt="LoKI plotting sin(x) and cos(x) and showing the plot in the chat">
+  <img src="assets/screenshot.png" width="49%" alt="LoKAI answering a question about disk usage and asking before it runs a command">
+  <img src="assets/screenshot-plot.png" width="49%" alt="LoKAI plotting sin(x) and cos(x) and showing the plot in the chat">
 </p>
 
 ## Features
@@ -20,7 +19,7 @@ files, asking for your approval first.
   LM Studio, vLLM, …
 - Tools: run commands, read, write and edit files, list directories, search file contents. You
   choose when it asks: before every tool, only before tools that change something, or never.
-- A scratch directory (`~/.local/share/loki/scratch` by default) where commands start and where
+- A scratch directory (`~/.local/share/lokai/scratch` by default) where commands start and where
   temporary and generated files go, so they don't end up in your home folder
 - Pictures in the chat: ask for a plot or chart, and the model draws it with Python and shows it
   inline, as wide as the chat; click it to open it in your image viewer
@@ -37,39 +36,39 @@ files, asking for your approval first.
 ## Installation
 
 Download a package for your distribution from the
-[releases page](https://github.com/YesserLab/loki/releases):
+[releases page](https://github.com/YesserLab/lokai/releases):
 
 ```sh
 # Debian / Ubuntu
-sudo apt install ./loki_1.2.0_amd64.deb
+sudo apt install ./lokai_1.2.0_amd64.deb
 
 # Fedora
-sudo dnf install ./loki-1.2.0-1.x86_64.rpm
+sudo dnf install ./lokai-1.2.0-1.x86_64.rpm
 
 # Arch / Manjaro
-sudo pacman -U loki-1.2.0-1-x86_64.pkg.tar.zst
+sudo pacman -U lokai-1.2.0-1-x86_64.pkg.tar.zst
 ```
 
-Each package installs the `loki` binary, a desktop entry and the icon. They need glibc 2.39 or
-newer: Ubuntu 24.04+, Debian 13+, Fedora 40+, or Arch. LoKI needs a Plasma 6 Wayland session (X11
-isn't supported); the window placement relies on KWin. Optionally, LoKI depends on `uv` to make its
+Each package installs the `lokai` binary, a desktop entry and the icon. They need glibc 2.39 or
+newer: Ubuntu 24.04+, Debian 13+, Fedora 40+, or Arch. LoKAI needs a Plasma 6 Wayland session (X11
+isn't supported); the window placement relies on KWin. Optionally, LoKAI depends on `uv` to make its
 own Python venv for scripts. The packages also recommend `wl-clipboard`, so copied text stays on
 the clipboard after the launcher closes, and `ripgrep` for faster searches.
 
-LoKI doesn't add itself to autostart. To start it with your session, add it in System Settings →
-Autostart and change the command to `loki --background`, which starts it with only the tray icon.
+LoKAI doesn't add itself to autostart. To start it with your session, add it in System Settings →
+Autostart and change the command to `lokai --background`, which starts it with only the tray icon.
 
 ## Usage
 
-Run `loki`, or launch "LoKI" from your application menu. On first start, open the settings
+Run `lokai`, or launch "LoKAI" from your application menu. On first start, open the settings
 (Ctrl+, or the gear icon) and enter your server's URL. The default is `http://127.0.0.1:8080`, a
 server on this PC; for another machine on your network, use its address, e.g.
-`http://192.168.1.50:8080`. LoKI picks the first model the server lists; you can switch models
+`http://192.168.1.50:8080`. LoKAI picks the first model the server lists; you can switch models
 from the footer.
 
 | Key | Action |
 |---|---|
-| Meta+Alt+Space | toggle the launcher (change it in System Settings → Keyboard → Shortcuts → LoKI) |
+| Meta+Alt+Space | toggle the launcher (change it in System Settings → Keyboard → Shortcuts → LoKAI) |
 | Enter / Shift+Enter | send / new line |
 | Enter (prompt empty) | allow the pending tool call |
 | ↑ / ↓ | recall previous prompts |
@@ -77,10 +76,10 @@ from the footer.
 | Ctrl+N | clear the session |
 | Ctrl+, | settings |
 
-From the command line: `loki` (start, or show the running instance), `loki --toggle`,
-`loki --settings`, `loki --background`, `loki --quit`.
+From the command line: `lokai` (start, or show the running instance), `lokai --toggle`,
+`lokai --settings`, `lokai --background`, `lokai --quit`.
 
-The settings live in `~/.config/loki/config.toml`:
+The settings live in `~/.config/lokai/config.toml`:
 
 - **Server**: URL (`/v1` is added if the URL has no path), optional API key, model, local network
   restriction
@@ -88,7 +87,7 @@ The settings live in `~/.config/loki/config.toml`:
 - **Tools**: on/off, approval mode, start directory, scratch directory, command timeout, output
   limit, max tool rounds
 - **Window**: launcher size, hide on focus loss, tray icon, keep history
-  (`~/.local/share/loki/history.json`)
+  (`~/.local/share/lokai/history.json`)
 
 The tools:
 
@@ -110,11 +109,11 @@ directory, which is also their `$TMPDIR`; open it with the folder button in the 
 - **Tray**: a StatusNotifierItem. The monochrome icon is an SVG with Plasma's `ColorScheme-Text`
   class, so the panel recolors it.
 - **Shortcut**: registered with KGlobalAccel over D-Bus, so it shows up in System Settings.
-- **Placement**: Wayland apps can't position their own windows, so on every open LoKI loads a
+- **Placement**: Wayland apps can't position their own windows, so on every open LoKAI loads a
   small KWin script over D-Bus. It centers the launcher on the screen under the cursor (again
   whenever the launcher's height changes), keeps it above other windows, hides it from the
   taskbar and focuses it.
-- **Single instance**: the running app owns `org.loki.LoKI` on the session bus; a second `loki`
+- **Single instance**: the running app owns `org.lokai.LoKAI` on the session bus; a second `lokai`
   hands its command to it.
 
 ## Building from source
@@ -128,7 +127,7 @@ Requirements:
 
 ```sh
 just              # list recipes
-just build        # build target/release/loki (thin LTO, stripped)
+just build        # build target/release/lokai (thin LTO, stripped)
 just run          # build and run
 just test         # unit tests and clippy
 just e2e http://127.0.0.1:8080   # agent runs against a real server

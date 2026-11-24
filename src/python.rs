@@ -69,7 +69,7 @@ mod tests {
     #[test]
     #[ignore]
     fn venv_roundtrip() {
-        let scratch = std::env::temp_dir().join(format!("loki-venv-{}", std::process::id()));
+        let scratch = std::env::temp_dir().join(format!("lokai-venv-{}", std::process::id()));
         let dir = ensure_venv(&scratch).unwrap();
         assert!(dir.join("bin/python").exists() && dir.join("bin/pip").exists(), "python and pip in {}", dir.display());
         let again = ensure_venv(&scratch).unwrap(); // already there: no second creation

@@ -146,7 +146,7 @@ impl Core {
             .name("venv".into())
             .spawn(move || {
                 if let Err(e) = crate::python::ensure_venv(&scratch) {
-                    eprintln!("loki: no Python environment: {e}");
+                    eprintln!("lokai: no Python environment: {e}");
                 }
             })
             .unwrap();
@@ -697,7 +697,7 @@ fn system_prompt(cfg: &Config, cwd: &std::path::Path) -> String {
     let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "KDE".into());
     let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
-    let mut p = String::from("You are LoKI, a capable assistant running on the user's Linux desktop (KDE Plasma). ");
+    let mut p = String::from("You are LoKAI, a capable assistant running on the user's Linux desktop (KDE Plasma). ");
     if cfg.tools_enabled {
         p.push_str(
             "You can operate the machine through tools: run shell commands, read, write and edit files, list directories and search file contents. \
@@ -798,10 +798,10 @@ mod tests {
     }
 
     /// A Core living in a throwaway home (HOME and the XDG directories under $TMPDIR), connected to
-    /// `$LOKI_TEST_SERVER` with a model selected. Returns it with the temporary directory.
+    /// `$LOKAI_TEST_SERVER` with a model selected. Returns it with the temporary directory.
     fn agent_core(name: &str, approval: Approval) -> (Arc<Core>, PathBuf) {
-        let server = std::env::var("LOKI_TEST_SERVER").expect("set LOKI_TEST_SERVER");
-        let tmp = std::env::temp_dir().join(format!("loki-{name}-{}", std::process::id()));
+        let server = std::env::var("LOKAI_TEST_SERVER").expect("set LOKAI_TEST_SERVER");
+        let tmp = std::env::temp_dir().join(format!("lokai-{name}-{}", std::process::id()));
         std::fs::create_dir_all(tmp.join("home")).unwrap();
         // SAFETY: single-threaded at this point; the fake directories keep the user's real files untouched.
         unsafe {
@@ -855,8 +855,8 @@ mod tests {
 
     /// Plotting end to end, in a conversation that started under an older build (its system prompt
     /// knows nothing about the Python environment or show_image, so it must be refreshed): the model
-    /// installs matplotlib into LoKI's venv and shows the plot. Downloads matplotlib:
-    /// `LOKI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_plot`
+    /// installs matplotlib into LoKAI's venv and shows the plot. Downloads matplotlib:
+    /// `LOKAI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_plot`
     #[test]
     #[ignore]
     fn agent_plot() {
@@ -864,7 +864,7 @@ mod tests {
         {
             let mut st = core.lock();
             st.api = vec![
-                json!({"role": "system", "content": "You are LoKI, a capable assistant. Be concise."}),
+                json!({"role": "system", "content": "You are LoKAI, a capable assistant. Be concise."}),
                 json!({"role": "user", "content": "Hi"}),
                 json!({"role": "assistant", "content": "Hello! How can I help?"}),
             ];
@@ -882,7 +882,7 @@ mod tests {
             .expect("no successful show_image call");
         let scratch = st.config.scratch_dir();
         assert!(shown.starts_with(&scratch), "image outside scratch: {}", shown.display());
-        // matplotlib went into LoKI's environment, and the model didn't make one of its own
+        // matplotlib went into LoKAI's environment, and the model didn't make one of its own
         let venv = crate::python::venv_dir(&scratch);
         let has_mpl = std::fs::read_dir(venv.join("lib")).unwrap().flatten().any(|d| d.path().join("site-packages/matplotlib").is_dir());
         assert!(has_mpl, "matplotlib is not installed in {}", venv.display());
@@ -898,7 +898,7 @@ mod tests {
     }
 
     /// Generated files land in the scratch directory, not in home:
-    /// `LOKI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_scratch`
+    /// `LOKAI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_scratch`
     #[test]
     #[ignore]
     fn agent_scratch() {
@@ -921,7 +921,7 @@ mod tests {
     }
 
     /// Writing, editing, reading and running, each asking for approval:
-    /// `LOKI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_e2e`
+    /// `LOKAI_TEST_SERVER=http://host:8080 cargo test -- --ignored --nocapture agent_e2e`
     #[test]
     #[ignore]
     fn agent_e2e() {
@@ -935,7 +935,7 @@ mod tests {
         }
         let approvals = run_agent(
             &core,
-            "Create notes.txt containing 'hello from loki', change 'hello' to 'goodbye' with edit_file, \
+            "Create notes.txt containing 'hello from lokai', change 'hello' to 'goodbye' with edit_file, \
              read it back, run `uname -s`, then answer in one short sentence.",
             Duration::from_secs(300),
         );
@@ -943,7 +943,7 @@ mod tests {
         println!("tps={:.1} ctx={} conn={:?} latency={:?} approvals={approvals}", st.tps, st.context_tokens, st.conn, st.latency_ms);
         assert!(!st.items.iter().any(|i| matches!(i, Item::Error { .. })));
         assert!(st.items.iter().any(|i| matches!(i, Item::Tool(t) if t.name == "edit_file" && t.status == ToolStatus::Done)));
-        assert_eq!(std::fs::read_to_string(work.join("notes.txt")).unwrap().trim(), "goodbye from loki");
+        assert_eq!(std::fs::read_to_string(work.join("notes.txt")).unwrap().trim(), "goodbye from lokai");
         assert!(st.tps > 0.0 && st.context_tokens > 0 && st.conn == Conn::Connected && approvals > 0);
         drop(st);
         std::fs::remove_dir_all(&tmp).unwrap();

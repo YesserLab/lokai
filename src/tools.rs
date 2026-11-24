@@ -284,7 +284,7 @@ fn format_output(o: &Output) -> String {
     if out.trim().is_empty() { "(no output)".into() } else { out.trim_start_matches('\n').to_string() }
 }
 
-const CWD_MARK: &str = "\n__LOKI_CWD__";
+const CWD_MARK: &str = "\n__LOKAI_CWD__";
 
 fn run_command(args: &Value, ctx: &mut Ctx) -> Result<String, String> {
     let command = s(args, "command");
@@ -295,8 +295,8 @@ fn run_command(args: &Value, ctx: &mut Ctx) -> Result<String, String> {
     let mut cmd = Command::new("bash");
     // `eval` keeps syntax errors inside the script so the cwd is still reported.
     cmd.arg("-c")
-        .arg(format!("eval \"$LOKI_CMD\"\n__ec=$?\nprintf '{}%s' \"$PWD\"\nexit $__ec", CWD_MARK.replace('\n', "\\n")))
-        .env("LOKI_CMD", command);
+        .arg(format!("eval \"$LOKAI_CMD\"\n__ec=$?\nprintf '{}%s' \"$PWD\"\nexit $__ec", CWD_MARK.replace('\n', "\\n")))
+        .env("LOKAI_CMD", command);
     let mut out = run_process(cmd, ctx, timeout)?;
     if let Some(pos) = out.stdout.rfind(CWD_MARK) {
         let dir = out.stdout[pos + CWD_MARK.len()..].trim_end().to_string();
@@ -387,7 +387,7 @@ fn human_size(n: u64) -> String {
 /// Largest image file show_image accepts.
 const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 
-/// Checks that the file is an image LoKI can display; the chat then shows it (from the path in
+/// Checks that the file is an image LoKAI can display; the chat then shows it (from the path in
 /// the tool's detail). The model only gets a confirmation, since it can't see pictures.
 fn show_image(args: &Value, ctx: &mut Ctx) -> Result<String, String> {
     let path = ctx.resolve(s(args, "path"));
@@ -492,7 +492,7 @@ mod tests {
 
     #[test]
     fn show_image_checks_the_file() {
-        let dir = std::env::temp_dir().join(format!("loki-show-image-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lokai-show-image-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (cancel, pgid) = (AtomicBool::new(false), AtomicI32::new(0));
         let mut ctx = ctx_in(&dir, &cancel, &pgid);
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn tools_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("loki-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lokai-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (cancel, pgid) = (AtomicBool::new(false), AtomicI32::new(0));
         let mut ctx = ctx_in(&dir, &cancel, &pgid);

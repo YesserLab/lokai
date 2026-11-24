@@ -83,8 +83,8 @@ fn open(core: &Arc<Core>, rx: &mpsc::Receiver<Cmd>, view: View) -> Outcome {
     };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("LoKI")
-            .with_app_id("loki")
+            .with_title("LoKAI")
+            .with_app_id("lokai")
             .with_inner_size([width + 2.0 * MARGIN, height + 2.0 * MARGIN])
             .with_decorations(false)
             .with_transparent(true)
@@ -98,7 +98,7 @@ fn open(core: &Arc<Core>, rx: &mpsc::Receiver<Cmd>, view: View) -> Outcome {
     };
     let mut outcome = Outcome::Closed;
     let result = eframe::run_native(
-        "loki",
+        "lokai",
         options,
         Box::new(|cc| {
             theme::install_fonts(&cc.egui_ctx);
@@ -149,7 +149,7 @@ fn open(core: &Arc<Core>, rx: &mpsc::Receiver<Cmd>, view: View) -> Outcome {
     );
     core.set_repaint(None);
     if let Err(e) = result {
-        eprintln!("loki: cannot open window: {e}");
+        eprintln!("lokai: cannot open window: {e}");
     }
     outcome
 }
@@ -291,7 +291,7 @@ impl Launcher<'_> {
                     if let Some(cfg) = self.draft.take()
                         && let Err(e) = self.core.set_config(cfg)
                     {
-                        eprintln!("loki: cannot save settings: {e}");
+                        eprintln!("lokai: cannot save settings: {e}");
                     }
                     self.view = View::Chat;
                     self.focus_input = true;
@@ -838,7 +838,7 @@ impl Launcher<'_> {
             _ => "png",
         };
         let stamp = modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let uri = format!("bytes://loki-image/{:x}-{stamp}.{ext}", {
+        let uri = format!("bytes://lokai-image/{:x}-{stamp}.{ext}", {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
             path.hash(&mut h);
@@ -1191,7 +1191,7 @@ impl Launcher<'_> {
                     row_label(ui, "Shortcut");
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Meta+Alt+Space by default").color(p.text));
-                        if ui.button("Change…").on_hover_text("System Settings → Keyboard → Shortcuts → LoKI").clicked() {
+                        if ui.button("Change…").on_hover_text("System Settings → Keyboard → Shortcuts → LoKAI").clicked() {
                             let _ = std::process::Command::new("systemsettings").arg("kcm_keys").spawn();
                         }
                     });
@@ -1287,7 +1287,7 @@ mod tests {
 }
 
 /// Renders the launcher offscreen into PNGs for visual review:
-/// `LOKI_SNAPSHOT_DIR=/tmp/shots cargo test --release -- --ignored render_snapshots`
+/// `LOKAI_SNAPSHOT_DIR=/tmp/shots cargo test --release -- --ignored render_snapshots`
 #[cfg(test)]
 mod snapshots {
     use super::*;
@@ -1309,7 +1309,7 @@ R(\theta) = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta 
 Unsupported LaTeX stays readable: $\frac{1}{$.";
 
     fn render(name: &str, view: View, fill: impl Fn(&mut State)) {
-        let dir = std::path::PathBuf::from(std::env::var("LOKI_SNAPSHOT_DIR").unwrap_or_else(|_| "target/snapshots".into()));
+        let dir = std::path::PathBuf::from(std::env::var("LOKAI_SNAPSHOT_DIR").unwrap_or_else(|_| "target/snapshots".into()));
         render_to(&dir.join(format!("{name}.png")), view, fill);
     }
 
@@ -1349,9 +1349,9 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).unwrap();
         }
-        let tmp = std::env::temp_dir().join(format!("loki-snap-{}-{}", std::process::id(), path.display().to_string().replace('/', "_")));
-        std::fs::create_dir_all(tmp.join("config/loki")).unwrap();
-        std::fs::write(tmp.join("config/loki/config.toml"), "server_url = \"http://127.0.0.1:1\"\n").unwrap();
+        let tmp = std::env::temp_dir().join(format!("lokai-snap-{}-{}", std::process::id(), path.display().to_string().replace('/', "_")));
+        std::fs::create_dir_all(tmp.join("config/lokai")).unwrap();
+        std::fs::write(tmp.join("config/lokai/config.toml"), "server_url = \"http://127.0.0.1:1\"\n").unwrap();
         // SAFETY: set before any other thread reads them; keeps the real config untouched.
         unsafe {
             std::env::set_var("XDG_CONFIG_HOME", tmp.join("config"));
@@ -1438,7 +1438,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
     #[test]
     #[ignore]
     fn readme_screenshot() {
-        let dir = PathBuf::from(std::env::var("LOKI_SCREENSHOT_DIR").unwrap_or_else(|_| "assets".into()));
+        let dir = PathBuf::from(std::env::var("LOKAI_SCREENSHOT_DIR").unwrap_or_else(|_| "assets".into()));
         render_to(&dir.join("screenshot-plot.png"), View::Chat, |st| {
             plot_scene(st);
             st.config.height = 776.0;
@@ -1523,7 +1523,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
                     id: "c2".into(),
                     name: "run_command".into(),
                     summary: "df -h /home".into(),
-                    detail: "$ df -h /home\n# in ~/Projects/loki".into(),
+                    detail: "$ df -h /home\n# in ~/Projects/lokai".into(),
                     output: "Filesystem      Size  Used Avail Use% Mounted on\n/dev/nvme0n1p3  1.8T  1.1T  690G  62% /home".into(),
                     status: ToolStatus::Done,
                 }),

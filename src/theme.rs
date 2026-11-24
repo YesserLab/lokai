@@ -215,9 +215,9 @@ fn system_fallback(req: &egui::epaint::text::FallbackRequest<'_>) -> Option<egui
     })
 }
 
-/// The LoKI icon (assets/loki.svg: Lucide's bot outline in the LoKI gradient), as `size`×`size` RGBA.
+/// The LoKAI icon (assets/lokai.svg: Lucide's bot outline in the LoKAI gradient), as `size`×`size` RGBA.
 pub fn icon_rgba(size: u32) -> Vec<u8> {
-    render_svg(include_str!("../assets/loki.svg"), size).expect("the bundled icon is valid SVG")
+    render_svg(include_str!("../assets/lokai.svg"), size).expect("the bundled icon is valid SVG")
 }
 
 /// Renders an SVG into a `size`×`size` image (straight-alpha RGBA).

@@ -51,7 +51,7 @@ fn typeset(tex: &str, inline: bool, color: Color32, size: f32) -> Option<Formula
     let mut h = std::collections::hash_map::DefaultHasher::new();
     image.svg.hash(&mut h);
     Some(Formula {
-        uri: format!("bytes://loki-math/{:x}.svg", h.finish()),
+        uri: format!("bytes://lokai-math/{:x}.svg", h.finish()),
         bytes: image.svg.into_bytes().into(),
         size,
         baseline: points(&image.baseline_pt),

@@ -1,4 +1,4 @@
-//! Settings (TOML in ~/.config/loki) and the local-network policy.
+//! Settings (TOML in ~/.config/lokai) and the local-network policy.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -80,7 +80,7 @@ pub struct Config {
     pub approval: Approval,
     /// Start directory for tools (empty = the scratch directory).
     pub working_dir: String,
-    /// Where temporary and generated files go (empty = ~/.local/share/loki/scratch).
+    /// Where temporary and generated files go (empty = ~/.local/share/lokai/scratch).
     pub scratch_dir: String,
     pub command_timeout_secs: u64,
     pub max_output_chars: usize,
@@ -131,14 +131,14 @@ pub fn home_dir() -> PathBuf {
 }
 
 pub fn config_dir() -> PathBuf {
-    xdg("XDG_CONFIG_HOME", ".config").join("loki")
+    xdg("XDG_CONFIG_HOME", ".config").join("lokai")
 }
 
 pub fn data_dir() -> PathBuf {
-    xdg("XDG_DATA_HOME", ".local/share").join("loki")
+    xdg("XDG_DATA_HOME", ".local/share").join("lokai")
 }
 
-/// Default scratch directory for temporary and generated files: `~/.local/share/loki/scratch`.
+/// Default scratch directory for temporary and generated files: `~/.local/share/lokai/scratch`.
 pub fn default_scratch_dir() -> PathBuf {
     data_dir().join("scratch")
 }
@@ -151,7 +151,7 @@ impl Config {
     pub fn load() -> Self {
         match std::fs::read_to_string(Self::path()) {
             Ok(text) => toml::from_str(&text).unwrap_or_else(|e| {
-                eprintln!("loki: ignoring invalid {}: {e}", Self::path().display());
+                eprintln!("lokai: ignoring invalid {}: {e}", Self::path().display());
                 Self::default()
             }),
             Err(_) => Self::default(),
@@ -183,7 +183,7 @@ impl Config {
     pub fn policy_error(&self) -> Option<String> {
         let url = self.server_url.trim();
         if url.starts_with("https://") {
-            return Some("LoKI talks plain http:// to local servers; https is not supported.".into());
+            return Some("LoKAI talks plain http:// to local servers; https is not supported.".into());
         }
         if !url.starts_with("http://") {
             return Some("The server URL must start with http://".into());
@@ -273,15 +273,15 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = Config::default().start_dir();
         assert_eq!(dir, default_scratch_dir());
-        assert!(dir.is_dir() && dir.ends_with("loki/scratch"));
+        assert!(dir.is_dir() && dir.ends_with("lokai/scratch"));
         assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o077, 0);
     }
 
     #[test]
     fn custom_scratch_dir() {
-        let cfg = Config { scratch_dir: "~/loki-test-scratch".into(), ..Default::default() };
-        assert_eq!(cfg.scratch_dir(), home_dir().join("loki-test-scratch"));
-        let tmp = std::env::temp_dir().join(format!("loki-custom-scratch-{}", std::process::id()));
+        let cfg = Config { scratch_dir: "~/lokai-test-scratch".into(), ..Default::default() };
+        assert_eq!(cfg.scratch_dir(), home_dir().join("lokai-test-scratch"));
+        let tmp = std::env::temp_dir().join(format!("lokai-custom-scratch-{}", std::process::id()));
         let cfg = Config { scratch_dir: tmp.display().to_string(), ..Default::default() };
         assert_eq!(cfg.start_dir(), tmp);
         assert!(tmp.is_dir());

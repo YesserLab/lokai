@@ -1,7 +1,7 @@
-# LoKI build recipes
+# LoKAI build recipes
 
 version   := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1`
-bin       := "target/release/loki"
+bin       := "target/release/lokai"
 # Newest glibc the packages may require: Debian 13 has 2.41, Ubuntu 24.04 and Fedora 40 have 2.39.
 max_glibc := "2.39"
 
@@ -12,7 +12,7 @@ export RUSTFLAGS := "--remap-path-prefix=" + env_var("HOME") + "=~ --remap-path-
 default:
     @just --list
 
-# Build the release binary into target/release/loki (thin LTO, stripped).
+# Build the release binary into target/release/lokai (thin LTO, stripped).
 build:
     cargo build --release --locked
 
@@ -27,11 +27,11 @@ test:
 
 # Agent runs against a real server, e.g. `just e2e http://127.0.0.1:8080`.
 e2e server:
-    LOKI_TEST_SERVER={{server}} cargo test -- --ignored --nocapture agent_
+    LOKAI_TEST_SERVER={{server}} cargo test -- --ignored --nocapture agent_
 
 # Render the launcher into PNGs for a visual check.
 snapshots dir="target/snapshots":
-    LOKI_SNAPSHOT_DIR={{dir}} cargo test -- --ignored render_snapshots
+    LOKAI_SNAPSHOT_DIR={{dir}} cargo test -- --ignored render_snapshots
 
 # Render the README screenshots into assets/ (screenshot.png, screenshot-plot.png).
 screenshot:
@@ -54,15 +54,15 @@ stage destdir: build
     #!/usr/bin/env bash
     set -euo pipefail
     d="{{destdir}}"
-    install -Dm755 {{bin}}                 "$d/usr/bin/loki"
-    install -Dm644 packaging/loki.desktop  "$d/usr/share/applications/loki.desktop"
-    install -Dm644 assets/loki.svg         "$d/usr/share/icons/hicolor/scalable/apps/loki.svg"
-    install -Dm644 README.md               "$d/usr/share/doc/loki/README.md"
-    install -Dm644 LICENSE                 "$d/usr/share/licenses/loki/LICENSE"
-    install -Dm644 assets/lucide/LICENSE   "$d/usr/share/licenses/loki/LICENSE.lucide"
-    install -Dm644 packaging/licenses/NOTICE-latex-rust.txt "$d/usr/share/licenses/loki/NOTICE.latex-rust"
-    install -Dm644 packaging/licenses/OFL-STIX-Two-Math.txt "$d/usr/share/licenses/loki/OFL.stix-two-math"
-    echo "staged loki into $d"
+    install -Dm755 {{bin}}                 "$d/usr/bin/lokai"
+    install -Dm644 packaging/lokai.desktop  "$d/usr/share/applications/lokai.desktop"
+    install -Dm644 assets/lokai.svg         "$d/usr/share/icons/hicolor/scalable/apps/lokai.svg"
+    install -Dm644 README.md               "$d/usr/share/doc/lokai/README.md"
+    install -Dm644 LICENSE                 "$d/usr/share/licenses/lokai/LICENSE"
+    install -Dm644 assets/lucide/LICENSE   "$d/usr/share/licenses/lokai/LICENSE.lucide"
+    install -Dm644 packaging/licenses/NOTICE-latex-rust.txt "$d/usr/share/licenses/lokai/NOTICE.latex-rust"
+    install -Dm644 packaging/licenses/OFL-STIX-Two-Math.txt "$d/usr/share/licenses/lokai/OFL.stix-two-math"
+    echo "staged lokai into $d"
 
 # Build distro packages (deb, rpm, archlinux) into dist/ with nfpm.
 package: check-glibc

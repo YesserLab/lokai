@@ -20,16 +20,14 @@ asking for your approval first.
 - Tools: run commands, read, write and edit files, list directories, search file contents. You
   choose when it asks: before every tool, only before tools that change something, or never.
 - A scratch directory (`~/.local/share/lokai/scratch` by default) where commands start and where
-  temporary and generated files go, so they don't end up in your home folder
+  temporary and generated files go.
 - Pictures in the chat: ask for a plot or chart, and the model draws it with Python and shows it
-  inline, as wide as the chat; click it to open it in your image viewer
+  inline; click it to open it in your image viewer
 - LaTeX math in answers is typeset
 - Streaming answers with Markdown, syntax-highlighted code blocks with a copy button, and the
   model's reasoning folded away
 - A tray icon with live status (connection and latency, model, tok/s, context size, activity) and
-  *Open Chat*, *Clear Session*, *Settings…*, *Exit*. Middle-click toggles the chat. The icon is
-  monochrome by default and follows the panel's colors; it can also be the color logo or any
-  icon you pick.
+  *Open Chat*, *Clear Session*, *Settings…*, *Exit*. Middle-click toggles the chat.
 - Follows your KDE color scheme, accent color and fonts; icons from Lucide
 - The conversation is kept across restarts
 

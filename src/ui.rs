@@ -25,6 +25,10 @@ const PAD: Vec2 = vec2(18.0, 14.0);
 /// Panel height when there is no conversation yet.
 const COMPACT_HEIGHT: f32 = 176.0;
 const PROMPT_MARGIN: Margin = Margin { left: 10, right: 5, top: 5, bottom: 5 };
+/// Height of one line of the input row, and of the whole input field with one line.
+const PROMPT_ROW: f32 = 36.0;
+/// The input grows up to this text height (about 7 lines); longer text scrolls inside it.
+const PROMPT_MAX_TEXT: f32 = 180.0;
 const GAP: f32 = 10.0;
 /// How long Esc has to be held to stop a running reply (a tap closes the window).
 const ESC_HOLD: f64 = 0.6;
@@ -139,6 +143,7 @@ fn open(core: &Arc<Core>, rx: &mpsc::Receiver<Cmd>, view: View) -> Outcome {
                 reasoning_open: HashSet::new(),
                 copied: None,
                 esc_hold: None,
+                prompt_extra: 0.0,
                 images: HashMap::new(),
                 math: Default::default(),
                 sent_history: Vec::new(),
@@ -195,6 +200,8 @@ struct Launcher<'a> {
     copied: Option<(Id, f64)>,
     /// Esc went down while a reply was running: when, and whether holding it already stopped it.
     esc_hold: Option<(f64, bool)>,
+    /// How much taller than one line the input field currently is.
+    prompt_extra: f32,
     /// Images shown in the chat: file → (modification time, uri, bytes, width / height).
     /// Reloaded when the file changes.
     images: HashMap<PathBuf, (std::time::SystemTime, String, egui::load::Bytes, f32)>,
@@ -363,7 +370,14 @@ impl Launcher<'_> {
         let mut actions = Vec::new();
 
         // Window height follows the content (compact bar vs. full conversation).
-        let height = panel_height(self.view, &st);
+        let mut height = panel_height(self.view, &st);
+        let compact = self.view == View::Chat && st.items.is_empty();
+        if compact {
+            height += self.prompt_extra; // the compact launcher grows with a multi-line input
+        }
+        // The field may only grow as far as the window already has: the window follows a frame
+        // later, and a field drawn taller than that first would jump back once the window caught up.
+        let prompt_room = if compact { (ui.max_rect().height() - 2.0 * MARGIN - COMPACT_HEIGHT).max(0.0) } else { f32::INFINITY };
         if (height - self.requested_height).abs() > 0.5 {
             self.requested_height = height;
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(self.width + 2.0 * MARGIN, height + 2.0 * MARGIN)));
@@ -422,12 +436,14 @@ impl Launcher<'_> {
             self.footer(ui, &st, &mut actions);
             ui.add_space(GAP);
             if self.view == View::Chat {
-                self.prompt_bar(ui, &st, &mut actions);
+                self.prompt_bar(ui, &st, prompt_room, &mut actions);
                 ui.add_space(GAP);
             }
             let body_h = ui.available_height();
             ui.allocate_ui_with_layout(vec2(ui.available_width(), body_h), Layout::top_down(Align::Min), |ui| {
                 ui.set_min_height(body_h);
+                // Never draw over the input field, even while the window is still growing.
+                ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                 match self.view {
                     View::Settings => self.settings(ui, &st, &mut actions),
                     View::Chat if st.items.is_empty() => self.empty_state(ui, &st, &mut actions),
@@ -528,84 +544,116 @@ fn tool_title(name: &str) -> &str {
 }
 
 impl Launcher<'_> {
-    fn prompt_bar(&mut self, ui: &mut egui::Ui, st: &State, actions: &mut Vec<Action>) {
+    /// `room`: how much taller than one line the field may be drawn now (see `draw`).
+    fn prompt_bar(&mut self, ui: &mut egui::Ui, st: &State, room: f32, actions: &mut Vec<Action>) {
         let p = self.p;
         let id = Id::unique("prompt");
         let has_focus = ui.memory(|m| m.has_focus(id));
         let border = if has_focus { p.tint(p.accent, 170) } else { p.border };
-        Frame::new().fill(p.surface).stroke(Stroke::new(1.0, border)).corner_radius(14).inner_margin(PROMPT_MARGIN).show(ui, |ui| {
-            ui.allocate_ui_with_layout(vec2(ui.available_width(), 36.0), Layout::left_to_right(Align::Center), |ui| {
-                ui.add(egui::Image::new(&self.logo).fit_to_exact_size(vec2(24.0, 24.0)));
-                ui.add_space(6.0);
-                let approval = st.pending_approval();
-                let enter = has_focus && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
-                // Up/Down recall previously sent prompts when the field is empty or showing one.
-                if has_focus && !self.sent_history.is_empty() && (self.input.is_empty() || self.sent_history.contains(&self.input)) {
-                    let pos = self.sent_history.iter().position(|h| *h == self.input);
-                    if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
-                        let i = pos.map_or(self.sent_history.len() - 1, |i| i.saturating_sub(1));
-                        self.input = self.sent_history[i].clone();
-                    } else if pos.is_some() && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
-                        let i = pos.unwrap() + 1;
-                        self.input = self.sent_history.get(i).cloned().unwrap_or_default();
-                    }
-                }
-                let hint = if approval.is_some() {
-                    "Press Enter to allow the pending tool call…"
-                } else if st.busy {
-                    "Working… (hold Esc to stop)"
-                } else {
-                    "Ask anything…"
-                };
-                let width = ui.available_width() - 34.0 - 10.0;
-                let resp = ui.add(
-                    TextEdit::multiline(&mut self.input)
-                        .id(id)
-                        .frame(Frame::NONE)
-                        .desired_rows(1)
-                        .desired_width(width)
-                        .font(FontId::proportional(18.0))
-                        .margin(Margin::symmetric(0, 4))
-                        .hint_text(RichText::new(hint).color(p.faint).size(18.0)),
-                );
+        let approval = st.pending_approval();
+        // Enter sends; Shift+Enter is left to the text field, which starts a new line.
+        // (consume_key ignores an extra Shift, so check it first.)
+        let enter = has_focus && ui.input_mut(|i| !i.modifiers.shift && i.consume_key(Modifiers::NONE, Key::Enter));
+        // Up/Down recall previously sent prompts when the field is empty or showing one.
+        if has_focus && !self.sent_history.is_empty() && (self.input.is_empty() || self.sent_history.contains(&self.input)) {
+            let pos = self.sent_history.iter().position(|h| *h == self.input);
+            if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
+                let i = pos.map_or(self.sent_history.len() - 1, |i| i.saturating_sub(1));
+                self.input = self.sent_history[i].clone();
+            } else if pos.is_some() && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
+                let i = pos.unwrap() + 1;
+                self.input = self.sent_history.get(i).cloned().unwrap_or_default();
+            }
+        }
+        let hint = if approval.is_some() {
+            "Press Enter to allow the pending tool call…"
+        } else if st.busy {
+            "Working… (hold Esc to stop)"
+        } else {
+            "Ask anything…"
+        };
+        let _ =
+            Frame::new().fill(p.surface).stroke(Stroke::new(1.0, border)).corner_radius(14).inner_margin(PROMPT_MARGIN).show(ui, |ui| {
+                // The row is as tall as the wrapped text (one line up to PROMPT_MAX_TEXT, beyond that the
+                // text scrolls). Logo, field and button are placed in it explicitly, the logo and the
+                // button level with the last line.
+                let (logo_w, gap, button_w) = (24.0, 8.0, 34.0);
+                let text_width = ui.available_width() - logo_w - button_w - 2.0 * gap;
+                // The text field is exactly as tall as its text (no margin, no minimum height); the
+                // row pads it equally above and below so that one line sits centered in PROMPT_ROW.
+                let measure = |text: String| ui.painter().layout(text, FontId::proportional(18.0), p.text, text_width).size().y;
+                let line = measure(" ".into());
+                let text = if self.input.is_empty() { " ".to_string() } else { self.input.clone() };
+                let wanted = measure(text).clamp(line, PROMPT_MAX_TEXT);
+                // How much taller than one line the field wants to be; the compact launcher grows by as much.
+                self.prompt_extra = wanted - line;
+                let field_height = wanted.min(line + room);
+                let pad = (PROMPT_ROW - line) / 2.0;
+                let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), field_height + 2.0 * pad), Sense::hover());
+                let last_line = row.bottom() - PROMPT_ROW / 2.0;
+
+                let logo = Rect::from_center_size(pos2(row.left() + logo_w / 2.0, last_line), vec2(24.0, 24.0));
+                egui::Image::new(&self.logo).paint_at(ui, logo);
+
+                let field = Rect::from_min_size(pos2(row.left() + logo_w + gap, row.top() + pad), vec2(text_width, field_height));
+                let mut field_ui = ui.new_child(UiBuilder::new().max_rect(field).layout(Layout::top_down(Align::Min)));
+                let resp = ScrollArea::vertical()
+                    .id_salt("prompt-scroll")
+                    .max_height(field_height)
+                    .auto_shrink([false, false])
+                    .show(&mut field_ui, |ui| {
+                        ui.spacing_mut().interact_size.y = 0.0; // or a single line would be 28 pt tall
+                        ui.add(
+                            TextEdit::multiline(&mut self.input)
+                                .id(id)
+                                .frame(Frame::NONE)
+                                .desired_rows(1)
+                                .desired_width(text_width)
+                                .font(FontId::proportional(18.0))
+                                .margin(Margin::ZERO)
+                                .min_size(Vec2::ZERO)
+                                .hint_text(RichText::new(hint).color(p.faint).size(18.0)),
+                        )
+                    })
+                    .inner;
                 if self.focus_input {
                     resp.request_focus();
                     self.focus_input = false;
                 }
-                if enter {
-                    match approval {
-                        Some(id) if self.input.trim().is_empty() => actions.push(Action::Resolve(id, Decision::Allow)),
-                        _ if !st.busy && !self.input.trim().is_empty() => {
-                            actions.push(Action::Send(self.input.clone()));
-                        }
-                        _ => {}
+
+                let button = Rect::from_center_size(pos2(row.right() - button_w / 2.0, last_line), vec2(button_w, button_w));
+                let mut button_ui = ui.new_child(UiBuilder::new().max_rect(button));
+                if st.busy {
+                    let stop = round_button(&mut button_ui, &p, true, true, "Stop (hold Esc)");
+                    if stop.clicked() {
+                        actions.push(Action::Stop);
                     }
+                    // While Esc is held, a ring fills around the stop button.
+                    if let Some((since, false)) = self.esc_hold {
+                        let t = ((ui.input(|i| i.time) - since) / ESC_HOLD).clamp(0.0, 1.0) as f32;
+                        let (c, r) = (stop.rect.center(), 19.5);
+                        let points: Vec<Pos2> = (0..=48)
+                            .map(|k| {
+                                let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * t * k as f32 / 48.0;
+                                c + vec2(a.cos(), a.sin()) * r
+                            })
+                            .collect();
+                        ui.painter().add(egui::Shape::line(points, Stroke::new(2.5, p.err)));
+                        ui.ctx().request_repaint();
+                    }
+                } else if round_button(&mut button_ui, &p, !self.input.trim().is_empty(), false, "Send (Enter)").clicked() {
+                    actions.push(Action::Send(self.input.clone()));
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if st.busy {
-                        let stop = round_button(ui, &p, true, true, "Stop (hold Esc)");
-                        if stop.clicked() {
-                            actions.push(Action::Stop);
-                        }
-                        // While Esc is held, a ring fills around the stop button.
-                        if let Some((since, false)) = self.esc_hold {
-                            let t = ((ui.input(|i| i.time) - since) / ESC_HOLD).clamp(0.0, 1.0) as f32;
-                            let (c, r) = (stop.rect.center(), 19.5);
-                            let points: Vec<Pos2> = (0..=48)
-                                .map(|k| {
-                                    let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * t * k as f32 / 48.0;
-                                    c + vec2(a.cos(), a.sin()) * r
-                                })
-                                .collect();
-                            ui.painter().add(egui::Shape::line(points, Stroke::new(2.5, p.err)));
-                            ui.ctx().request_repaint();
-                        }
-                    } else if round_button(ui, &p, !self.input.trim().is_empty(), false, "Send (Enter)").clicked() {
-                        actions.push(Action::Send(self.input.clone()));
-                    }
-                });
             });
-        });
+        if enter {
+            match approval {
+                Some(id) if self.input.trim().is_empty() => actions.push(Action::Resolve(id, Decision::Allow)),
+                _ if !st.busy && !self.input.trim().is_empty() => {
+                    actions.push(Action::Send(self.input.clone()));
+                }
+                _ => {}
+            }
+        }
     }
 
     fn empty_state(&mut self, ui: &mut egui::Ui, st: &State, actions: &mut Vec<Action>) {
@@ -1443,6 +1491,7 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
                         reasoning_open: HashSet::new(),
                         copied: None,
                         esc_hold: None,
+                        prompt_extra: 0.0,
                         images: HashMap::new(),
                         math: Default::default(),
                         sent_history: Vec::new(),
@@ -1485,6 +1534,48 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
         h.key_up(Key::Escape);
         h.run_steps(2);
         assert!(h.ctx.memory(|m| m.has_focus(prompt)), "the input field isn't focused after stopping");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Shift+Enter starts a new line; Enter sends the message.
+    #[test]
+    fn shift_enter_starts_a_new_line() {
+        let (mut h, tmp, core) = harness("shift-enter", View::Chat, |_| {});
+        h.run_steps(2);
+        h.event(egui::Event::Text("hello".into()));
+        h.key_press_modifiers(Modifiers::SHIFT, Key::Enter);
+        h.run_steps(1);
+        assert!(core.lock().items.is_empty(), "Shift+Enter sent the message");
+        h.event(egui::Event::Text("world".into()));
+        h.key_press(Key::Enter);
+        h.run_steps(2);
+        let sent = core.lock().items.iter().find_map(|i| match i {
+            Item::User { text } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(sent.as_deref(), Some("hello\nworld"));
+        core.stop();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A long input grows the field upwards, never over the footer below it.
+    #[test]
+    fn long_input_grows_without_overlapping() {
+        use egui_kittest::kittest::Queryable;
+        let (mut h, tmp, _) = harness("long-input", View::Chat, |st| {
+            st.items = vec![Item::User { text: "Earlier question".into() }];
+        });
+        h.run_steps(2);
+        let field = |h: &Harness| h.get_by_role(egui::accesskit::Role::MultilineTextInput).rect();
+        let footer_top = h.get_by_label("scratch").rect().min.y;
+        let one_line = field(&h);
+        // Long enough to wrap onto several lines, short enough not to scroll (PROMPT_MAX_TEXT).
+        h.event(egui::Event::Text("a long line of text that wraps over several rows of the input field, ".repeat(3)));
+        h.run_steps(3);
+        let grown = field(&h);
+        assert!(grown.height() > one_line.height() * 2.0, "the field didn't grow: {one_line:?} -> {grown:?}");
+        assert!(grown.max.y <= footer_top, "the field overlaps the footer: bottom {} > footer top {footer_top}", grown.max.y);
+        assert!((grown.max.y - one_line.max.y).abs() < 1.0, "the field should grow upwards");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -1553,6 +1644,20 @@ Unsupported LaTeX stays readable: $\frac{1}{$.";
         h.run_steps(2); // 0.5 s of the 0.6 s
         let dir = PathBuf::from(std::env::var("LOKAI_SNAPSHOT_DIR").unwrap_or_else(|_| "target/snapshots".into()));
         h.render().expect("render").save(dir.join("holding-esc.png")).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+        // A long, multi-line input: the field grows upwards, the button stays at the last line.
+        let (mut h, tmp, _) = harness("long-input", View::Chat, |st| {
+            st.items = vec![
+                Item::User { text: "Earlier question".into() },
+                Item::Assistant { text: "An earlier answer.".into(), reasoning: String::new(), streaming: false },
+            ];
+        });
+        h.run_steps(2);
+        h.event(egui::Event::Text("Please review this paragraph and tell me whether the argument holds: ".repeat(3)));
+        h.key_press_modifiers(Modifiers::SHIFT, Key::Enter);
+        h.event(egui::Event::Text("Thanks!".into()));
+        h.run_steps(3);
+        h.render().expect("render").save(dir.join("long-input.png")).unwrap();
         let _ = std::fs::remove_dir_all(&tmp);
         render("math", View::Chat, |st| {
             st.items = vec![
